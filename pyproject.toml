@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lyra-browser"
+version = "0.1.0"
+description = "Headful, collaborative browser MCP server for the VEGA agent harness — VEGA drives a visible Chromium window the user can watch and take over."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "unohee" }]
+keywords = ["mcp", "playwright", "browser-automation", "vega", "lyra", "co-browsing"]
+
+# fastmcp tracks the VEGA harness (3.2.0). playwright is held at 1.59, one minor
+# above the harness bundle (1.58.0): element refs (`aria_snapshot(mode="ai")`)
+# arrive in 1.59. Until VEGA bundles 1.59 its runtime degrades to
+# `refs: false`, see docs/VEGA_INTEGRATION.md.
+dependencies = [
+    "fastmcp>=3.2,<4",
+    "playwright>=1.59,<2",
+    "pydantic>=2.6,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.6",
+    "pre-commit>=3.7",
+]
+# A drop-in Playwright fork that does not send Runtime.enable, the one CDP
+# call Kasada refuses on; session.load_driver prefers it when
+# it is installed; nothing else changes.
+patchright = [
+    "patchright>=1.63,<2",
+]
+
+[project.scripts]
+lyra-browser = "lyra_browser.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/Intrect-io/lyra-browser"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lyra_browser"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "W"]

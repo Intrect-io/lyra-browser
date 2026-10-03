@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Playwright
+playwright-report/
+test-results/
+
+# Local browser data (profile, audit) when written into the repo for dev
+.lyra-browser/
+*.jsonl
+
+# OS / editor
+.DS_Store
+*.swp
+
+# Experiment scratch (promoted code moves into src/ or tests/)
+testing/
+
+# Local review-tool artefacts
+.openswarm/
+tests/

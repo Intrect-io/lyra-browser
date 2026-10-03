@@ -1,0 +1,120 @@
+{
+  "_meta": {
+    "generated": "2026-10-01",
+    "mode": "headless",
+    "driver": "playwright",
+    "browser": "chrome"
+  },
+  "sites": {
+    "local-embed+form": {
+      "success": true,
+      "clicked": true,
+      "navigations": 2,
+      "blocked": 0,
+      "tree_elements": 5,
+      "tree_chars": 151,
+      "text_chars": 28,
+      "elapsed_s": 2.3
+    },
+    "example.com": {
+      "success": true,
+      "clicked": false,
+      "navigations": 1,
+      "blocked": 0,
+      "tree_elements": 1,
+      "tree_chars": 74,
+      "text_chars": 917,
+      "elapsed_s": 1.4
+    },
+    "iana.org": {
+      "success": true,
+      "clicked": true,
+      "navigations": 2,
+      "blocked": 0,
+      "tree_elements": 41,
+      "tree_chars": 2252,
+      "text_chars": 1240,
+      "elapsed_s": 3.0
+    },
+    "w3.org": {
+      "success": true,
+      "clicked": true,
+      "navigations": 2,
+      "blocked": 0,
+      "tree_elements": 58,
+      "tree_chars": 4209,
+      "text_chars": 3367,
+      "elapsed_s": 3.0
+    },
+    "python.org": {
+      "success": true,
+      "clicked": true,
+      "navigations": 2,
+      "blocked": 0,
+      "tree_elements": 215,
+      "tree_chars": 12536,
+      "text_chars": 3829,
+      "elapsed_s": 4.6
+    },
+    "MDN": {
+      "success": true,
+      "clicked": true,
+      "navigations": 2,
+      "blocked": 0,
+      "tree_elements": 165,
+      "tree_chars": 13553,
+      "text_chars": 12010,
+      "elapsed_s": 4.2
+    },
+    "GitHub": {
+      "success": true,
+      "clicked": true,
+      "navigations": 2,
+      "blocked": 0,
+      "tree_elements": 319,
+      "tree_chars": 24657,
+      "text_chars": 10802,
+      "elapsed_s": 6.7
+    },
+    "HackerNews": {
+      "success": true,
+      "clicked": true,
+      "navigations": 2,
+      "blocked": 0,
+      "tree_elements": 227,
+      "tree_chars": 15721,
+      "text_chars": 4112,
+      "elapsed_s": 4.1
+    },
+    "Wikipedia": {
+      "success": true,
+      "clicked": true,
+      "navigations": 2,
+      "blocked": 0,
+      "tree_elements": 1069,
+      "tree_chars": 83121,
+      "text_chars": 54579,
+      "elapsed_s": 5.5
+    },
+    "httpbin": {
+      "success": true,
+      "clicked": true,
+      "navigations": 2,
+      "blocked": 0,
+      "tree_elements": 40,
+      "tree_chars": 2518,
+      "text_chars": 819,
+      "elapsed_s": 5.7
+    },
+    "neverssl": {
+      "success": false,
+      "clicked": false,
+      "navigations": 2,
+      "blocked": 1,
+      "tree_elements": 0,
+      "tree_chars": 0,
+      "text_chars": 0,
+      "elapsed_s": 2.5
+    }
+  }
+}
