@@ -740,6 +740,21 @@ lyra-browser                            # serve over stdio (what VEGA spawns)
 | `LYRA_BROWSER_ALLOW_BUNDLED` | `true` | Allow bundled-Chromium fallback (only exists after `playwright install`). |
 | `LYRA_BROWSER_DRIVER` | `auto` | Which Playwright to launch with: `auto` takes `patchright` when installed and falls back to `playwright`; either name pins it. `open_browser` reports the one in use as `driver`. |
 | `LYRA_BROWSER_GUARD` | `route` | Where the navigation guard stands: `route` (Playwright's route) or `cdp` (a second DevTools connection: every redirect hop judged, cache on, DataDome lets the browser in, a loopback debugging port, `guard_lost` if the guard fails). See Guard backends. |
+| `LYRA_UAT_CLAUDE_BIN` | `claude` on `PATH` | The Claude Code executable the `claude-code` UAT brain runs. See UAT mode. |
+| `LYRA_UAT_CODEX_BIN` | `codex` on `PATH` | The Codex executable the `codex` UAT brain runs. See UAT mode. |
+
+## UAT mode
+
+`lyra-uat` plays a *persona* — who is visiting, from where, in what language, with what goal and how many steps — against a site, through the tools above, and writes `report.json`. The model that plays it is replaceable: Claude Code, Codex, the Anthropic API, OpenRouter, Ollama Cloud, or any OpenAI-compatible endpoint. What makes a run trustworthy is not: **the server, not the model, keeps the trace**. Whichever brain drives, every tool call is recorded as it happens, the step budget is enforced, a screenshot is taken after each action, a payment-card number is never typed, an upload outside the persona's directory is refused, and leaving the sites under test cannot be approved by the model's own `confirm=true`.
+
+```bash
+pip install -e ".[uat]"
+lyra-uat demo-site --port 8787 &             # a small site with things to find
+lyra-uat run examples/uat/demo/run.yaml      # one persona, Claude Code plays it
+lyra-uat batch examples/uat/demo/batch.yaml  # two personas in parallel, one process each
+```
+
+A run leaves a directory: `report.json` (and `report.md`), `trace.jsonl`, `events.jsonl`, `captures/`, `network.jsonl`, `console.jsonl`, and the browser's own `audit.jsonl`. Persona, target, brain, hooks and limits are YAML or JSON; `lyra-uat schema run|batch|report` prints the JSON Schemas. Details, the report format and each brain's requirements are in [docs/UAT.md](docs/UAT.md).
 
 ## Headless mode
 

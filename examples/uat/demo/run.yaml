@@ -1,0 +1,13 @@
+# One persona against the demo site:
+#   lyra-uat demo-site --port 8787 &
+#   lyra-uat run examples/uat/demo/run.yaml
+persona_file: demo-phone.yaml
+target_file: target.yaml
+prior_findings_file: prior-findings.json
+brain:
+  backend: claude-code      # anthropic | openrouter | ollama | openai-compat | claude-code | codex
+  max_turns: 60
+  max_budget_usd: 5
+limits:
+  wall_s: 600
+out_dir: uat-runs

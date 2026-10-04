@@ -1,0 +1,7 @@
+# The built-in demo site: `lyra-uat demo-site --port 8787`.
+trusted_origins:
+  - "http://127.0.0.1:8787"
+trusted_send_origins:
+  - "http://127.0.0.1:8787"
+network_capture:
+  - "/collect"

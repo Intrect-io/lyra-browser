@@ -1,0 +1,16 @@
+id: demo-phone
+name: Phone visitor from a search result
+entry_url: http://127.0.0.1:8787/
+viewport: 390x844
+locale: en-US
+account: none
+goal: >
+  Find out what this service costs and whether there is a free way to try it,
+  without creating an account or paying.
+success_criteria:
+  - Can say what each plan costs and what, if anything, distinguishes them.
+  - Finds the free trial path or establishes that none exists.
+step_budget: 15
+must_not:
+  - sign up or sign in
+  - enter payment details

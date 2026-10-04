@@ -1,0 +1,17 @@
+# The code on /verify exists only as pixels on a canvas, so this persona can only
+# succeed if the screenshot really reaches its model.
+id: vision
+name: Visitor checking a verification badge
+entry_url: http://127.0.0.1:8787/
+viewport: 1280x800
+locale: en-US
+account: none
+goal: >
+  Find the verification page from the home page and report, in a note, the code
+  printed on the verification badge exactly as you see it.
+success_criteria:
+  - Reaches the verification page by following the page's own link.
+  - Reports the badge code in a note.
+step_budget: 8
+must_not:
+  - sign up or sign in

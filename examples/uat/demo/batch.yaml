@@ -1,0 +1,18 @@
+# Both personas in parallel, one process each:
+#   lyra-uat batch examples/uat/demo/batch.yaml
+target_file: target.yaml
+prior_findings_file: prior-findings.json
+brain:
+  backend: claude-code
+  max_turns: 60
+  max_budget_usd: 5
+report_language: English
+personas:
+  demo-phone: demo-phone.yaml
+  vision: vision.yaml
+groups:
+  - name: anonymous
+    mode: parallel
+    personas: [demo-phone, vision]
+concurrency: 2
+out_dir: uat-runs

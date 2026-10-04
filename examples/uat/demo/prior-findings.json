@@ -1,0 +1,9 @@
+[
+  {
+    "id": "R0-01",
+    "severity": "minor",
+    "url": "http://127.0.0.1:8787/pricing",
+    "expected": "Each plan says what it includes.",
+    "actual": "The plans list prices but not what each includes."
+  }
+]

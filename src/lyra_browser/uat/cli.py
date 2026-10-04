@@ -1,4 +1,4 @@
-"""``lyra-uat``: run personas, batches, and inspect what they produce.
+"""lyra-uat: run personas, batches, and inspect what they produce.
 
 Subcommands::
 
