@@ -745,7 +745,7 @@ lyra-browser                            # serve over stdio (what VEGA spawns)
 
 ## UAT mode
 
-`lyra-uat` plays a *persona* — who is visiting, from where, in what language, with what goal and how many steps — against a site, through the tools above, and writes `report.json`. The model that plays it is replaceable: Claude Code, Codex, the Anthropic API, OpenRouter, Ollama Cloud, or any OpenAI-compatible endpoint. What makes a run trustworthy is not: **the server, not the model, keeps the trace**. Whichever brain drives, every tool call is recorded as it happens, the step budget is enforced, a screenshot is taken after each action, a payment-card number is never typed, an upload outside the persona's directory is refused, and leaving the sites under test cannot be approved by the model's own `confirm=true`.
+`lyra-uat` plays a *persona* — who is visiting, from where, in what language, with what goal and how many steps — against a site, through the tools above, and writes `report.json`. The model that plays it is replaceable: Claude Code, Codex, the Anthropic API, OpenRouter, Ollama Cloud, or any OpenAI-compatible endpoint. What makes a run trustworthy is not: **the server, not the model, keeps the trace**. Whichever brain drives, every tool call is recorded as it happens, the step budget is enforced, a screenshot is taken after each action, a `type_text` value that looks like a payment-card number is refused, an upload outside the persona's directory is refused, and leaving the sites under test cannot be approved by the model's own `confirm=true`.
 
 ```bash
 pip install -e ".[uat]"

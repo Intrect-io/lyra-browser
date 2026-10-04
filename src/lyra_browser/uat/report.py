@@ -33,6 +33,7 @@ ExitReason = Literal[
     "harness_exit",
     "hook_failed",
     "no_finish",
+    "interrupted",
 ]
 OutcomeStatus = Literal["reached_goal", "partial", "blocked", "unknown"]
 

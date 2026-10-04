@@ -139,19 +139,27 @@ async def _run_harness_brain(
         info = BrainInfo(backend=brain.backend, error=str(exc))
     if reason is None and info.exit_code not in (None, 0):
         reason = "harness_exit"
-    observations_file = run_dir / "observations.json"
-    observations = None
-    if observations_file.exists():
-        try:
-            observations = json.loads(observations_file.read_text(encoding="utf-8"))
-        except ValueError:
-            observations = None
-    return info, reason, observations
+    return info, reason, read_observations(run_dir)
+
+
+def read_observations(run_dir: Path) -> dict | None:
+    """What the server last wrote about the browser and the page's wire (it rewrites the
+    file after every step, so a killed run still has a current one)."""
+    path = run_dir / "observations.json"
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except ValueError:
+        return None
 
 
 async def run_spec(spec: RunSpec, *, brain: LoopBrain | HarnessBrain | None = None) -> Report:
     """Run one persona and write its report. Never raises for what the persona met;
-    only for a run directory that cannot be created or a spec that names no brain."""
+    only for a run directory that cannot be created or a spec that names no brain.
+
+    Interrupted (Ctrl-C, a batch stopping its child) it still writes the report of what
+    happened so far, marked ``interrupted``, and then lets the cancellation through."""
     started = datetime.now(UTC)
     run_id = new_run_id(spec.persona.id, started)
     run_dir = (spec.out_dir / run_id).resolve()
@@ -175,11 +183,22 @@ async def run_spec(spec: RunSpec, *, brain: LoopBrain | HarnessBrain | None = No
                 backend=brain.backend,
                 error=f"before hook exited {hooks.before.exit_code}; the browser was not started",
             )
+    interrupted = False
     if reason is None:
-        if isinstance(brain, HarnessBrain):
-            info, reason, observations = await _run_harness_brain(spec, run_dir, run_file, brain)
-        else:
-            info, reason, observations = await _run_loop_brain(spec, run_dir, brain)
+        try:
+            if isinstance(brain, HarnessBrain):
+                info, reason, observations = await _run_harness_brain(
+                    spec, run_dir, run_file, brain
+                )
+            else:
+                info, reason, observations = await _run_loop_brain(spec, run_dir, brain)
+        except asyncio.CancelledError:
+            # The brain's own cleanup has run (the browser is closed, the harness group
+            # stopped); what is on disk is what the persona did before it was stopped.
+            interrupted = True
+            reason = "interrupted"
+            info = BrainInfo(backend=brain.backend, error="interrupted before the persona finished")
+            observations = read_observations(run_dir)
     if spec.hooks.after:
         hooks.after = await run_hook(
             spec.hooks.after, timeout_s=spec.hooks.timeout_s, cwd=run_dir, env=env
@@ -199,4 +218,6 @@ async def run_spec(spec: RunSpec, *, brain: LoopBrain | HarnessBrain | None = No
         run_file=run_file,
     )
     write_report(report, run_dir)
+    if interrupted:
+        raise asyncio.CancelledError
     return report

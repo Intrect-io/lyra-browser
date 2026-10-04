@@ -184,6 +184,39 @@ async def test_hooks_run_around_the_browser_and_a_failing_before_stops_it(fake_b
     assert report.hooks.after and "cleanup" in report.hooks.after.stdout_tail
 
 
+class WaitingBrain(LoopBrain):
+    backend = "waiting"
+
+    async def run(self, session):
+        await session.call("navigate", {"url": ENTRY})
+        await asyncio.sleep(30)
+        return BrainInfo(backend=self.backend)
+
+
+@pytest.mark.asyncio
+async def test_an_interrupted_run_still_writes_its_report_then_lets_the_cancellation_through(
+    fake_browser, tmp_path
+):
+    """Ctrl-C, or a batch stopping its child: the evidence so far must come out as a report."""
+    spec = spec_for(tmp_path, [{"tool": "finish", "args": {}}])
+    task = asyncio.create_task(runner_mod.run_spec(spec, brain=WaitingBrain()))
+    runs = tmp_path / "runs"
+    for _ in range(100):  # until the persona has made its first move
+        await asyncio.sleep(0.05)
+        trace = list(runs.glob("*/trace.jsonl"))
+        if trace and trace[0].read_text().strip():
+            break
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    reports = list(runs.glob("*/report.json"))
+    assert len(reports) == 1
+    report = Report.model_validate_json(reports[0].read_text(encoding="utf-8"))
+    assert report.run.status == "incomplete" and report.run.exit_reason == "interrupted"
+    assert report.trace and report.trace[0].tool == "navigate"
+    assert "interrupted" in (report.brain.error or "")
+
+
 class FileWritingHarness(HarnessBrain):
     """Stands in for Claude Code or Codex: writes the run's files as the child
     server would, then reports what the harness said."""

@@ -11,12 +11,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import signal
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ..procs import reap_group, spawn, stop_group
 from ..spec import UAT_TOOLS, RunSpec
 
 MCP_SERVER_NAME = "lyra"
@@ -84,12 +84,14 @@ async def run_process(
     log_dir: Path,
     stdin_text: str | None = None,
 ) -> ProcessResult:
-    """Run the harness to completion. Cancelled (the runner's wall clock), it is
-    interrupted first so the harness can end its turn, then killed."""
+    """Run the harness to completion. Cancelled (the runner's wall clock), the whole process
+    group — the harness, its MCP server, the browser — is interrupted first so the harness
+    can end its turn and close the server properly, then killed if it will not. After a
+    normal exit whatever the harness left running is stopped too."""
     loop = asyncio.get_running_loop()
     started = loop.time()
-    proc = await asyncio.create_subprocess_exec(
-        *argv,
+    proc = await spawn(
+        argv,
         cwd=str(cwd),
         env=env,
         stdin=asyncio.subprocess.PIPE if stdin_text is not None else asyncio.subprocess.DEVNULL,
@@ -101,14 +103,10 @@ async def run_process(
             input=stdin_text.encode("utf-8") if stdin_text is not None else None
         )
     except asyncio.CancelledError:
-        if proc.returncode is None:
-            proc.send_signal(signal.SIGINT)
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=GRACE_S)
-            except TimeoutError:
-                proc.kill()
-                await proc.wait()
+        # Shielded: a second cancellation must not leave a browser running on the profile.
+        await asyncio.shield(stop_group(proc, grace_s=GRACE_S))
         raise
+    await reap_group(proc.pid)
     stdout = out.decode("utf-8", errors="replace")
     stderr = err.decode("utf-8", errors="replace")
     (log_dir / "stdout.log").write_text(stdout, encoding="utf-8")

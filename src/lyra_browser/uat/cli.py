@@ -9,7 +9,8 @@ Subcommands::
     lyra-uat render <report.json>
 
 Exit codes of ``run``: 0 when the run completed (findings or not), 2 when it
-was cut off (budget, wall clock, harness) or the brain never finished, 1 on an
+was cut off (budget, wall clock, harness) or the brain never finished, 130 when
+it was interrupted (SIGINT/SIGTERM; a partial report is still written), 1 on an
 error before the browser did anything useful.
 """
 
@@ -18,6 +19,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import signal
 import sys
 from pathlib import Path
 
@@ -109,6 +111,33 @@ def _print_spec(spec) -> None:
     print(json.dumps(spec.model_dump(mode="json"), indent=2, ensure_ascii=False))
 
 
+EXIT_INTERRUPTED = 130
+
+
+def run_with_signals(coro):
+    """Run ``coro`` so that SIGINT and SIGTERM cancel it, whatever they were set to.
+
+    A job started in the background by a non-interactive shell inherits SIGINT as
+    *ignored*, and Python then installs no handler for it, so ``kill -INT`` would do
+    nothing and a plain ``kill`` would end the process without its cleanup — leaving a
+    harness, its server and a browser running. Cancelling the task instead runs the
+    cleanup (the browser is closed, the harness's process group stopped, a report of
+    what happened so far written) and then raises ``CancelledError`` to the caller.
+    """
+
+    async def main():
+        loop = asyncio.get_running_loop()
+        task = asyncio.current_task()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, task.cancel)
+            except (NotImplementedError, RuntimeError):  # not the main thread, or not POSIX
+                pass
+        return await coro
+
+    return asyncio.run(main())
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     spec = load_run_spec(args.spec, **_run_overrides(args))
     if args.dry_run:
@@ -116,7 +145,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         return EXIT_OK
     from .runner import run_spec
 
-    report = asyncio.run(run_spec(spec))
+    try:
+        report = run_with_signals(run_spec(spec))
+    except asyncio.CancelledError:
+        print(
+            "interrupted: the report of what happened so far is under the run directory",
+            file=sys.stderr,
+        )
+        return EXIT_INTERRUPTED
     print(report.one_line())
     print(report.artifacts.report_json)
     return EXIT_OK if report.run.status == "completed" else EXIT_INCOMPLETE
@@ -135,7 +171,15 @@ def cmd_batch(args: argparse.Namespace) -> int:
         return EXIT_OK
     from .batch import run_batch
 
-    summary = asyncio.run(run_batch(spec, only=args.only))
+    try:
+        summary = run_with_signals(run_batch(spec, only=args.only))
+    except asyncio.CancelledError:
+        print(
+            "interrupted: each running persona was stopped and wrote a partial report; "
+            "no batch summary was written",
+            file=sys.stderr,
+        )
+        return EXIT_INTERRUPTED
     print(summary.one_line())
     print(summary.path)
     return EXIT_OK if summary.all_completed else EXIT_INCOMPLETE

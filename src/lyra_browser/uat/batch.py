@@ -30,6 +30,7 @@ from typing import Any
 
 from pydantic import Field
 
+from .procs import reap_group, spawn, stop_group
 from .report import Model, Report
 from .spec import BatchSpec, RunSpec, load_persona
 
@@ -38,6 +39,8 @@ Launcher = Callable[[Path], list[str]]
 # Slack on top of a run's own wall clock and hooks before the parent gives up on a
 # child: the child enforces both itself, this only catches one that hangs outside them.
 CHILD_GRACE_S = 180
+# How long an interrupted child gets to close its own browser and write its report.
+CHILD_STOP_GRACE_S = 30.0
 
 
 class PersonaResult(Model):
@@ -132,8 +135,8 @@ def _tail(text: str, lines: int = 6) -> str:
 async def _run_child(
     argv: list[str], *, cwd: Path, log_base: Path, timeout_s: float, env: dict[str, str]
 ) -> tuple[int | None, str, str, bool]:
-    proc = await asyncio.create_subprocess_exec(
-        *argv,
+    proc = await spawn(
+        argv,
         cwd=str(cwd),
         env=env,
         stdin=asyncio.subprocess.DEVNULL,
@@ -145,8 +148,15 @@ async def _run_child(
         out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
     except TimeoutError:
         timed_out = True
-        proc.kill()
+        # The child is a whole run (a harness, its server, a browser): interrupt the group
+        # so the run can close its own browser and write its report, then kill what is left.
+        await stop_group(proc, grace_s=CHILD_STOP_GRACE_S)
         out, err = await proc.communicate()
+    except asyncio.CancelledError:
+        await asyncio.shield(stop_group(proc, grace_s=CHILD_STOP_GRACE_S))
+        raise
+    else:
+        await reap_group(proc.pid)
     stdout, stderr = out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
     log_base.with_suffix(".out.log").write_text(stdout, encoding="utf-8")
     log_base.with_suffix(".err.log").write_text(stderr, encoding="utf-8")

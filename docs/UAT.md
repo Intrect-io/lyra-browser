@@ -30,7 +30,7 @@ every tool call, whichever brain made it:
 | **The trace.** Every call, its arguments (typed values redacted), status, URL before and after, a result head. | Appended to `trace.jsonl` before the model sees the result, so a run cut off by a timeout or a crashed harness keeps everything up to that moment. |
 | **A screenshot after every action** that reached the page. | `captures/`, path in the trace step. Reads are not illustrated. |
 | **The step budget.** | Action steps (`navigate`, `click`, `type_text`, `press_key`, `hover`, `scroll`, `select_option`, `upload_file`, `handle_dialog`, `tabs` switch/close, …) count; the next one answers `budget_exhausted`. Reads, `finish` and the report tools never count. The first `navigate` to the entry URL is free. A call that never reached the page (`not_found`, `needs_approval`, …) is recorded but not counted. |
-| **No payment-card numbers.** | A `type_text` value that is 13–19 digits and passes Luhn is refused (`blocked_by_uat_policy`); the page never sees it. |
+| **No payment-card numbers through `type_text`.** | A `type_text` value that is 13–19 digits and passes Luhn is refused (`blocked_by_uat_policy`); the page never sees it. Digits sent one key at a time with `press_key` are not recognised: this is a backstop for a persona that is told never to pay, not a licence to point one at a live checkout. |
 | **Uploads only from the persona's directory.** | `upload_file` is not even offered without `uploads_allowed_dir`; with it, every path must resolve inside it. |
 | **Leaving the sites under test cannot be approved by the model.** | Consent is pinned to `elicit`; the in-memory client and both harnesses cannot answer it, so a navigation outside `trusted_origins` is `needs_approval` and stays one — `confirm=true` included. |
 | **A fixed tool set.** | The persona gets browser reading and acting tools plus `report_finding`, `verdict`, `note`, `finish`. Not `open_browser`/`close_browser` (the runner's), not editor/publish tools, not the collaboration tools (nobody is watching). |
@@ -161,8 +161,11 @@ them (`ANTHROPIC_API_KEY` or an `ant auth login` profile). Default model
 `claude-opus-5-5`; `brain.effort` sets `output_config.effort`. One tool call per
 turn, executed in order, the rest of a turn refused after the first failure;
 screenshots go back as image blocks; the system prompt is cached and messages
-are only ever appended to. A refusal is a `brain_error`. The report's cost is an
-estimate from a price table in the code, not a bill.
+are only ever appended to. A refusal is a `brain_error`: server-side refusal fallbacks
+(`fallbacks`) are deliberately not requested. The report's cost is an estimate from a
+price table in the code, not a bill. **This brain is covered by fake-client tests of its
+request shape, tool results, images, refusals and nudges, and has not been run against
+the live API.**
 
 ### `openrouter`, `ollama`, `openai-compat`
 
@@ -204,7 +207,7 @@ uat-runs/<run-id>/
 
 - `run` — `status` (`completed`, `incomplete`, `error`), `exit_reason` (`finish`,
   `budget_exhausted`, `wall_timeout`, `brain_error`, `browser_error`,
-  `harness_exit`, `hook_failed`, `no_finish`), timing.
+  `harness_exit`, `hook_failed`, `no_finish`, `interrupted`), timing.
 - `outcome` — what `finish` said (`reached_goal`, `partial`, `blocked`) or
   `unknown` when it never did; steps used against the budget; call count.
 - `findings` — severity (`blocker`, `major`, `minor`), URL, step, expected,
@@ -222,9 +225,36 @@ uat-runs/<run-id>/
   cost where known, session id. `observations`, `hooks`, `artifacts`.
 
 `lyra-uat run` exits 0 when the persona called `finish`, 2 when the run did not
-complete (budget, wall clock, a brain or hook failure, an invalid profile). A
-persona that finds nothing is a valid result **only with a complete trace**; an
-empty trace is reported as "not a clean run".
+complete (budget, wall clock, a brain or hook failure, an invalid profile), and 130
+when it was interrupted. A persona that finds nothing is a valid result **only with a
+complete trace**; an empty trace is reported as "not a clean run".
+
+## Stopping a run, and what is left behind
+
+A harness brain is three processes deep — the harness, the MCP server it spawns, the
+browser the server launches — and a batch adds a level above them. Each child is started
+as the leader of a session of its own and is stopped as a **group**: interrupted first,
+so the harness can end its turn and close its server (which closes the browser), then
+killed if it will not. What a harness leaves running after a normal exit is stopped too.
+
+- **Wall clock** (`limits.wall_s`): the group is interrupted, then killed after a grace
+  period; the report is written with `wall_timeout` and everything recorded so far.
+- **SIGINT / SIGTERM to `lyra-uat`** (Ctrl-C, `kill`, a service stop): the run is
+  cancelled, the browser and the harness group are stopped, a report is written with
+  `interrupted`, and the exit code is 130. This holds for a run started in the
+  background, where a shell passes SIGINT on as *ignored*. A batch stops each running
+  persona the same way but writes no `summary.json`.
+- **A harness group killed hard** (measured with Claude Code and Codex): the browser exits
+  on its own within seconds, because its debugging pipe closes with the server, and the
+  runner reports `harness_exit`.
+- **`lyra-uat run` itself killed with SIGKILL** cannot be handled, and nothing below it is
+  stopped: the harness carries on with its persona, with its browser, until it finishes
+  or reaches `brain.max_turns` / `brain.max_budget_usd`, then exits and takes the browser
+  with it. Keep those two limits set. Stop such a run with SIGINT to the harness's process
+  group.
+
+Process groups, signals and the `/proc` liveness check make this POSIX-only (Linux, macOS);
+it has not been run on Windows.
 
 ## Hooks
 
@@ -299,3 +329,5 @@ result with its stderr tail, not a failed batch.
 | `warnings: … never clicked` | The persona moved by URL only. Read the trace; broken links and buttons cannot have been found. |
 | `preseeded persona ran in an empty instance profile` | Another browser held the profile. Run such personas sequentially or give each its own `data_dir`. |
 | Report in the wrong language | Set `report_language`; a harness no longer inherits the operator's. |
+| `set OPENROUTER_API_KEY in the environment` although a key exists | The key has another name (`OPENROUTER_API`, say): pass it with `--api-key-env NAME` or `brain.api_key_env`. |
+| `exit_reason: interrupted` | The run was stopped by SIGINT/SIGTERM; the report covers what happened before. |
