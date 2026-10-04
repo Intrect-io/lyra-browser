@@ -33,3 +33,8 @@ testing/
 
 # UAT run directories (lyra-uat run / batch default out_dir)
 uat-runs/
+
+# Local secrets: API keys for the UAT brains live here, never in the tree
+.env
+.env.*
+!.env.example
