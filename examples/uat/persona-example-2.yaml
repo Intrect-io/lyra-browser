@@ -1,0 +1,17 @@
+# A second persona for the batch example: a desktop visitor who wants the details
+# the phone visitor could not find.
+id: p2
+name: Desktop visitor comparing plans
+entry_url: https://example.com/pricing
+viewport: 1440x900
+locale: en-US
+account: none
+goal: >
+  Work out which plan fits a solo creator and what, if anything, the more expensive
+  plan adds, using only what the pages say.
+success_criteria:
+  - Can state the difference between the plans, or establishes that the pages do not say.
+step_budget: 15
+must_not:
+  - sign up or sign in
+  - enter payment details

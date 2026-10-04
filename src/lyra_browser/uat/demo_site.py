@@ -1,15 +1,18 @@
 """A small site to run a persona against when there is no product at hand.
 
-Three pages on loopback with the things a UAT run must cope with: a link, a
-form, a price list with no feature comparison (something to find), a field
-that asks for a card number (something the persona must refuse), a link that
-leaves the site (something the server must refuse), an analytics-style hit, a
-console error and a page error. ``lyra-uat demo-site`` serves it; the real-
-browser gate (``scripts/verify_uat_e2e.py``) runs against it too.
+Pages on loopback with the things a UAT run must cope with: links, a form, a
+price list with no feature comparison (something to find), a field that asks
+for a card number (something the persona must refuse), a link that leaves the
+site (something the server must refuse), an analytics-style hit, a console
+error and a page error — and a verification page whose code exists only as
+pixels on a canvas, so a run can prove whether a screenshot really reached its
+model. ``lyra-uat demo-site`` serves it; the real-browser gate
+(``scripts/verify_uat_e2e.py``) runs against it too.
 """
 
 from __future__ import annotations
 
+import secrets
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,6 +22,7 @@ HOME = """<!doctype html><title>Demo home</title>
 <h1>Tune — clean up your tracks</h1>
 <p>Remove artifacts from AI-generated music. <a id="pricing" href="/pricing">See pricing</a>
 or <a id="try" href="/try">try it free</a>.</p>
+<p><a id="verify" href="/verify">Verification page</a></p>
 <form action="/submitted" method="post">
   <label>Your name <input id="name" name="name"></label>
   <button id="send">Send</button>
@@ -51,8 +55,25 @@ TRY = """<!doctype html><title>Try it free</title>
 <p><a href="/">Home</a></p>"""
 
 
+VERIFY = """<!doctype html><title>Verification</title>
+<h1>Verification</h1>
+<p>Your verification badge is shown below.</p>
+<canvas id="badge" width="360" height="110" role="img" aria-label="verification badge"></canvas>
+<p><a href="/">Home</a></p>
+<script>
+const c = document.getElementById('badge').getContext('2d');
+c.fillStyle = '#fff8dc'; c.fillRect(0, 0, 360, 110);
+c.strokeStyle = '#999'; c.beginPath(); c.moveTo(0, 20); c.lineTo(360, 90); c.stroke();
+c.fillStyle = '#222'; c.font = 'bold 56px monospace'; c.textBaseline = 'middle';
+c.fillText('__CODE__', 40, 56);
+</script>"""
+
+
 class Handler(BaseHTTPRequestHandler):
     alt_base = ""
+    # Drawn on the canvas of /verify and nowhere in the page's text or markup that a
+    # tool reads: only a model that was shown the screenshot can repeat it.
+    visual_code = "000000"
 
     def _send(self, body: str, status: int = 200, ctype: str = "text/html; charset=utf-8") -> None:
         raw = body.encode()
@@ -70,6 +91,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(PRICING.replace("__ALT__", self.alt_base))
         elif path == "/try":
             self._send(TRY)
+        elif path == "/verify":
+            self._send(VERIFY.replace("__CODE__", self.visual_code))
         elif path == "/collect":
             self._send("", 204, "text/plain")
         elif path == "/checkout":
@@ -105,6 +128,7 @@ def start(port: int | None = None) -> tuple[ThreadingHTTPServer, str, str]:
     port = port or free_port()
     base, alt = bases(port)
     Handler.alt_base = alt
+    Handler.visual_code = secrets.token_hex(3).upper()
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, base, alt
@@ -113,6 +137,7 @@ def start(port: int | None = None) -> tuple[ThreadingHTTPServer, str, str]:
 def serve_forever(port: int) -> None:
     server, base, alt = start(port)
     print(f"demo site at {base} (second origin {alt}); Ctrl-C to stop", flush=True)
+    print(f"verification code on /verify: {Handler.visual_code}", flush=True)
     try:
         threading.Event().wait()
     except KeyboardInterrupt:

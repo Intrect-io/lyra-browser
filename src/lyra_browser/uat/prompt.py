@@ -25,6 +25,11 @@ How the browser works
   again after navigating or whenever the page changes.
 - read_page (text) is the cheapest way to read. Take a screenshot only for what text
   cannot carry: layout, images, charts, a phone-width page. You see the picture.
+- Move around the way a person does: click the links and buttons you can see. navigate is
+  for the entry URL and for going back to a page you already visited. A visitor does not
+  type a path they read out of the page's markup, and a link that does not work is exactly
+  what this run is here to find — navigating around it hides it. If you do navigate to a
+  page you only learned from a link's address, say why in a note.
 - A click or typed Enter that sends a form needs submits=true (type_text: submit=true).
   Without it the browser stops the submission and answers blocked_by_policy.
 - Each tool answers a JSON envelope. status "ok" means the action happened, not that
@@ -98,6 +103,8 @@ def build_task_prompt(spec: RunSpec) -> str:
         _bullets(p.success_criteria, "the goal above, judged as that person would"),
         f"Budget: {p.step_budget} action steps (navigate, click, type, scroll ...). Reads are free."
         " Your first navigate to the entry URL is free.",
+        f"Write every note, finding, verdict and summary in {spec.report_language}, whatever"
+        " language the site or the persona uses.",
         "Must not:",
         _bullets(p.must_not),
         f"Uploads: {uploads}.",

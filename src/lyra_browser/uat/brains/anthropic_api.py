@@ -130,6 +130,9 @@ class AnthropicBrain(LoopBrain):
                 info.input_tokens += int(getattr(usage, "input_tokens", 0) or 0)
                 info.output_tokens += int(getattr(usage, "output_tokens", 0) or 0)
                 info.cache_read_tokens += int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+                info.cache_write_tokens += int(
+                    getattr(usage, "cache_creation_input_tokens", 0) or 0
+                )
             messages.append({"role": "assistant", "content": response.content})
 
             if response.stop_reason == "refusal":

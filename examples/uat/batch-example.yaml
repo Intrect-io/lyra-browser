@@ -1,18 +1,23 @@
 # Several personas against one target. Anonymous visitors run in parallel; personas
 # that share one account run one after another. Each persona is its own process
-# with its own browser profile.
+# with its own browser profile. The key under `personas` must equal the `id` inside
+# that persona's file.
 target_file: target-example.yaml
 brain:
   backend: claude-code
+brief_file: brief-example.md
+prior_findings_file: prior-findings-example.json
+report_language: English
 personas:
   p1: persona-example.yaml
-  p2: persona-example.yaml      # in practice a different file per persona
+  p2: persona-example-2.yaml
 groups:
   - name: anonymous
     mode: parallel
-    personas: [p1]
-  - name: signed-in
-    mode: sequential
-    personas: [p2]
+    personas: [p1, p2]
 concurrency: 4
 out_dir: uat-runs
+# A persona with `account: preseeded` also needs the profile that holds its login, and
+# two personas in one parallel group may not share a profile:
+# data_dirs:
+#   p3: ~/.local/state/uat-profiles/p3

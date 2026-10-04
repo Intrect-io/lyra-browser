@@ -257,6 +257,10 @@ class RunSpec(Strict):
     headless: bool = True
     guard_backend: Literal["route", "cdp"] = "route"
     driver: Literal["auto", "playwright", "patchright"] = "auto"
+    # What the persona writes its notes, findings and summary in. A harness runs
+    # as its own user would (a Korean operator's Claude answers in Korean), so the
+    # language of a report is a decision of the spec, never an inheritance.
+    report_language: str = "English"
 
     @field_validator("out_dir", "data_dir", mode="before")
     @classmethod
@@ -267,6 +271,18 @@ class RunSpec(Strict):
     @classmethod
     def _brief(cls, value: str | None) -> str | None:
         return value.strip() or None if value is not None else None
+
+    @model_validator(mode="after")
+    def _preseeded_needs_a_profile(self) -> RunSpec:
+        # A signed-in persona is only as signed in as the profile it is given. With no
+        # data_dir the run would start from an empty profile and meet the site as a
+        # stranger, while the report said it ran as the account.
+        if self.persona.account == "preseeded" and self.data_dir is None:
+            raise ValueError(
+                "persona.account is 'preseeded': give data_dir, the browser profile that "
+                "already holds the login (a `before` hook may seed it)"
+            )
+        return self
 
     def offered_tools(self) -> list[str]:
         """Browser tool names the persona is given, in a stable order."""
@@ -303,20 +319,51 @@ class BatchSpec(Strict):
     limits: Limits = Field(default_factory=Limits)
     tools: ToolPolicy = Field(default_factory=ToolPolicy)
     out_dir: Path = Path("uat-runs")
+    # Persona id -> browser profile (``LYRA_BROWSER_DATA_DIR`` layout) that already holds
+    # its login. Required for ``preseeded`` personas; others get a fresh profile.
+    data_dirs: dict[str, Path] = Field(default_factory=dict)
     headless: bool = True
     guard_backend: Literal["route", "cdp"] = "route"
     driver: Literal["auto", "playwright", "patchright"] = "auto"
+    report_language: str = "English"
 
     @field_validator("out_dir", mode="before")
     @classmethod
     def _expand(cls, value: object) -> object:
         return Path(value).expanduser() if isinstance(value, str) else value
 
+    @field_validator("data_dirs", mode="before")
+    @classmethod
+    def _expand_dirs(cls, value: object) -> object:
+        if isinstance(value, dict):
+            return {k: Path(v).expanduser() if isinstance(v, str) else v for k, v in value.items()}
+        return value
+
     @model_validator(mode="after")
     def _groups_name_known_personas(self) -> BatchSpec:
         unknown = [p for g in self.groups for p in g.personas if p not in self.personas]
         if unknown:
             raise ValueError(f"groups name personas not in `personas`: {sorted(set(unknown))}")
+        stray = sorted(set(self.data_dirs) - set(self.personas))
+        if stray:
+            raise ValueError(f"data_dirs name personas not in `personas`: {stray}")
+        # Two browsers on one profile cannot run at once: the second silently falls back
+        # to an empty profile (see the profile lock) and runs as a stranger.
+        for group in self.groups:
+            if group.mode != "parallel":
+                continue
+            seen: dict[Path, str] = {}
+            for pid in group.personas:
+                directory = self.data_dirs.get(pid)
+                if directory is None:
+                    continue
+                key = directory.expanduser().resolve()
+                if key in seen:
+                    raise ValueError(
+                        f"group {group.name!r} runs {seen[key]!r} and {pid!r} in parallel on "
+                        f"the same data_dir {directory}; make the group sequential"
+                    )
+                seen[key] = pid
         return self
 
 
@@ -393,6 +440,19 @@ def load_batch_spec(path: Path) -> BatchSpec:
     spec.personas = {
         pid: (path.parent / Path(p).expanduser()).resolve() for pid, p in spec.personas.items()
     }
+    # The key is how groups and data_dirs name a persona, the file's id is how its
+    # run and report do: when they differ, a report would answer to a name nothing
+    # in the batch uses. Refuse rather than pick one.
+    for pid, persona_path in spec.personas.items():
+        persona = load_persona(persona_path)
+        if persona.id != pid:
+            raise ValueError(
+                f"batch persona key {pid!r} does not match the id {persona.id!r} in {persona_path}"
+            )
+        if persona.account == "preseeded" and pid not in spec.data_dirs:
+            raise ValueError(
+                f"persona {pid!r} is 'preseeded': add its browser profile to `data_dirs`"
+            )
     return spec
 
 

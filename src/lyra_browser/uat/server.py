@@ -161,6 +161,19 @@ async def build_uat_server(
         return await shoot(full_page=False, inline=False)
 
     recorder.screenshot = capture
+
+    def browser_info() -> dict[str, Any]:
+        session = ctx.session
+        return {
+            # "shared" is the profile the run was given; "instance" is the empty one
+            # the session fell back to because another browser held that profile.
+            "profile_mode": getattr(session, "profile_mode", None),
+            "driver": getattr(session, "active_driver", None),
+            "channel": getattr(session, "active_channel", None),
+            "observer_errors": list(getattr(session, "observer_errors", []) or []),
+        }
+
+    recorder.browser_info = browser_info
     mcp.add_middleware(UatMiddleware(recorder, vision=spec.limits.vision == "on_demand"))
     return mcp, ctx, recorder
 

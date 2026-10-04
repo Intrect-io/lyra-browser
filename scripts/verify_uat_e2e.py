@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Exercise UAT mode against a real installed browser.
 
-An explicit runtime gate, not part of the unit suite. A loopback test site
-stands in for the product; a scripted brain stands in for the model, so the
-run is the same every time and what is checked is the server side of a run:
-the trace, the budget, the guards, the captures, the observers, the hooks and
-the report — in a real headless Chromium, through the real runner.
+An explicit runtime gate, not part of the unit suite. The built-in demo site
+(``lyra_browser.uat.demo_site``) stands in for the product; a scripted brain
+stands in for the model, so the run is the same every time and what is checked
+is the server side of a run: the trace, the budget, the guards, the captures,
+the observers, the hooks and the report — in a real headless Chromium, through
+the real runner.
 
     python scripts/verify_uat_e2e.py            # headless (the UAT default)
     python scripts/verify_uat_e2e.py --keep     # leave the run directories behind
@@ -17,77 +18,12 @@ import argparse
 import asyncio
 import json
 import shutil
-import socket
 import sys
 import tempfile
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
-
-HOME = """<!doctype html><title>UAT home</title>
-<h1>UAT home</h1>
-<p>Clean up your tracks. <a id="pricing" href="/pricing">See pricing</a></p>
-<form action="/submitted" method="post">
-  <label>Name <input id="name" name="name"></label>
-  <button id="send">Send</button>
-</form>
-<script>
-fetch('/collect?v=2&en=page_view&tt=internal', {method: 'POST', body: 'en=page_view'});
-console.error('demo console error');
-setTimeout(() => { throw new Error('demo page error'); }, 0);
-</script>"""
-
-PRICING = """<!doctype html><title>Pricing</title>
-<h1>Pricing</h1>
-<ul><li>Creator $9</li><li>Studio $29</li></ul>
-<label>Card number <input id="card" aria-label="Card number"></label>
-<a id="external" href="__ALT__checkout">Checkout elsewhere</a>
-<button id="buy" type="button" onclick="document.title='bought'">Buy</button>"""
-
-
-class Handler(BaseHTTPRequestHandler):
-    alt_base = ""
-
-    def _send(self, body: str, status: int = 200, ctype: str = "text/html; charset=utf-8") -> None:
-        raw = body.encode()
-        self.send_response(status)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(raw)))
-        self.end_headers()
-        self.wfile.write(raw)
-
-    def do_GET(self) -> None:  # noqa: N802
-        path = urlparse(self.path).path
-        if path == "/":
-            self._send(HOME)
-        elif path == "/pricing":
-            self._send(PRICING.replace("__ALT__", self.alt_base))
-        elif path == "/collect":
-            self._send("", 204, "text/plain")
-        elif path == "/checkout":
-            self._send("<title>checkout</title><h1>Checkout</h1>")
-        else:
-            self.send_error(404)
-
-    def do_POST(self) -> None:  # noqa: N802
-        self.rfile.read(int(self.headers.get("Content-Length") or 0))
-        if urlparse(self.path).path == "/collect":
-            self._send("", 204, "text/plain")
-        else:
-            self._send("<title>submitted</title><h1>Submitted</h1>")
-
-    def log_message(self, *_args: object) -> None:
-        pass
-
-
-def free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
 
 
 def expect(condition: bool, message: str, detail: object = "") -> None:
@@ -184,6 +120,12 @@ async def completed_run(base: str, alt_base: str, out: Path) -> None:
     expect(
         report.outcome.steps_used == 2, "two counted actions (pricing click, buy)", report.outcome
     )
+    expect(
+        report.metrics.clicks == 2 and report.metrics.direct_navigations == 0,
+        "metrics",
+        report.metrics,
+    )
+    expect(not report.warnings, "no warnings on a clean run", report.warnings)
     first = report.trace[0]
     expect(first.tool == "navigate" and first.system and not first.counted, "entry navigation free")
     statuses = [s.status for s in report.trace]
@@ -219,6 +161,7 @@ async def completed_run(base: str, alt_base: str, out: Path) -> None:
     expect(any("en=page_view" in h.get("url", "") for h in hits), "hit query string retained", hits)
     expect(obs.counts["console_errors"] >= 1, "console error counted", obs.counts)
     expect(obs.counts["page_errors"] >= 1, "page error counted", obs.counts)
+    expect(obs.browser.get("profile_mode") == "shared", "own profile, not a fallback", obs.browser)
     expect(
         "seeded e2e" in report.hooks.before.stdout_tail, "before hook ran with env", report.hooks
     )
@@ -232,7 +175,7 @@ async def completed_run(base: str, alt_base: str, out: Path) -> None:
     expect((run_dir / "browser" / "profile").is_dir(), "run has its own browser profile")
 
 
-async def budget_run(base: str, alt_base: str, out: Path) -> None:
+async def budget_run(base: str, out: Path) -> None:
     from lyra_browser.uat.runner import run_spec
 
     script = [
@@ -252,18 +195,14 @@ async def budget_run(base: str, alt_base: str, out: Path) -> None:
 
 
 async def main(keep: bool) -> None:
-    port = free_port()
-    base = f"http://127.0.0.1:{port}/"
-    alt_base = f"http://localhost:{port}/"
-    Handler.alt_base = alt_base
-    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
+    from lyra_browser.uat import demo_site
+
+    server, base, alt_base = demo_site.start()
     out = Path(tempfile.mkdtemp(prefix="lyra-uat-e2e-"))
     try:
-        print(f"test site {base}, runs in {out}")
+        print(f"demo site {base}, runs in {out}")
         await completed_run(base, alt_base, out)
-        await budget_run(base, alt_base, out)
+        await budget_run(base, out)
     finally:
         server.shutdown()
         if keep:

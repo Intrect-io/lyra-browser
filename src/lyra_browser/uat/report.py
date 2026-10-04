@@ -73,6 +73,7 @@ class BrainInfo(Model):
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     cost_usd: float | None = None
     session_id: str | None = None
     exit_code: int | None = None
@@ -167,6 +168,17 @@ class Observations(Model):
     counts: dict[str, int] = Field(default_factory=dict)
     matched: list[dict[str, Any]] = Field(default_factory=list)
     pages: int = 0
+    # What the server knows about the browser it drove: profile_mode ("shared" or
+    # "instance"), driver, channel, observer_errors.
+    browser: dict[str, Any] = Field(default_factory=dict)
+
+
+class Metrics(Model):
+    """How the persona moved, from the trace: what it did, not what it said."""
+
+    actions_by_tool: dict[str, int] = Field(default_factory=dict)
+    clicks: int = 0
+    direct_navigations: int = 0
 
 
 class HookResult(Model):
@@ -210,6 +222,8 @@ class Report(Model):
     side_effects: SideEffects
     policy: Policy
     observations: Observations | None = None
+    metrics: Metrics = Field(default_factory=Metrics)
+    warnings: list[str] = Field(default_factory=list)
     hooks: Hooks
     artifacts: Artifacts
 
@@ -373,6 +387,37 @@ def build_report(
             "error" if reason in ("brain_error", "browser_error", "hook_failed") else "incomplete"
         )
 
+    counted = Counter(s.tool for s in trace if s.counted)
+    metrics = Metrics(
+        actions_by_tool=dict(sorted(counted.items())),
+        clicks=counted.get("click", 0),
+        direct_navigations=counted.get("navigate", 0),
+    )
+    observations_model = Observations.model_validate(observations) if observations else None
+    warnings: list[str] = []
+    browser = observations_model.browser if observations_model else {}
+    if spec.persona.account == "preseeded" and browser.get("profile_mode") == "instance":
+        # Another browser held the profile the login lives in, and the server stepped
+        # aside to an empty one. Whatever this persona saw, it saw as a stranger: the run
+        # is not evidence about the signed-in experience, finish or not.
+        warnings.append(
+            "preseeded persona ran in an empty instance profile (the shared profile was held "
+            "by another browser): it was not signed in; the run is invalid"
+        )
+        status, reason = "error", "browser_error"
+    if browser.get("observer_errors"):
+        warnings.append(
+            "page observers failed to attach on some tabs; network and console records may be "
+            f"incomplete: {browser['observer_errors'][:3]}"
+        )
+    if metrics.direct_navigations and not metrics.clicks:
+        warnings.append(
+            f"the persona moved by URL ({metrics.direct_navigations} navigate) and never "
+            "clicked: broken links and buttons cannot have been found by this run"
+        )
+    if finish is None and not trace:
+        warnings.append("no tool call was recorded: this is not a clean run")
+
     captures_dir = run_dir / "captures"
     return Report(
         run=RunInfo(
@@ -410,7 +455,9 @@ def build_report(
             prompt_only=list(spec.persona.must_not),
             events=policy_events,
         ),
-        observations=Observations.model_validate(observations) if observations else None,
+        observations=observations_model,
+        metrics=metrics,
+        warnings=warnings,
         hooks=hooks,
         artifacts=Artifacts(
             dir=str(run_dir),
@@ -482,10 +529,15 @@ def render_markdown(report: Report) -> str:
         + (f" · ${report.brain.cost_usd:.4f}" if report.brain.cost_usd is not None else ""),
         f"Entry: {p.entry_url} · {p.viewport} · {p.locale} · account {p.account}",
     ]
+    if report.warnings:
+        lines += ["", "**Warnings**", ""] + [f"- {w}" for w in report.warnings]
     if o.summary:
         lines += ["", o.summary]
     if report.brain.error:
         lines += ["", f"Brain error: {report.brain.error}"]
+    if report.metrics.actions_by_tool:
+        moves = ", ".join(f"{k} {v}" for k, v in report.metrics.actions_by_tool.items())
+        lines += ["", f"Actions: {moves}"]
 
     lines += ["", "## Trace", ""]
     for s in report.trace:
@@ -513,8 +565,6 @@ def render_markdown(report: Report) -> str:
             "- none reported" + ("" if report.trace else " (and no trace: not a clean run)")
         )
 
-    if report.verdicts or any(True for _ in report.persona.known_limits):
-        pass
     if report.verdicts:
         lines += [
             "",

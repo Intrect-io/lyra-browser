@@ -168,6 +168,9 @@ class RunRecorder:
         # Set by the server builder: the run's network/console observers, flushed
         # after every step so their files keep pace with the trace.
         self.observers: Any | None = None
+        # Set by the server builder: what is known of the browser itself (profile
+        # mode, driver, observer failures), merged into observations.json.
+        self.browser_info: Callable[[], dict[str, Any]] | None = None
 
         self.steps: list[Step] = []
         self.steps_used = 0
@@ -393,6 +396,11 @@ class RunRecorder:
         if self.observers is None:
             return None
         summary = self.observers.summary()
+        if self.browser_info is not None:
+            try:
+                summary["browser"] = self.browser_info()
+            except Exception as exc:  # noqa: BLE001 — a report note, never a failed step
+                summary["browser"] = {"error": f"{type(exc).__name__}: {exc}"}
         path = self.run_dir / "observations.json"
         tmp = path.with_name(path.name + ".part")
         tmp.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")

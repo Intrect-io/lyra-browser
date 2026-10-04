@@ -24,6 +24,7 @@ from .harness import (
     child_env,
     harness_dir,
     json_lines,
+    offered_tool_names,
     run_process,
     server_command,
     write_prompts,
@@ -69,6 +70,9 @@ class CodexBrain(HarnessBrain):
             "--skip-git-repo-check",
             "--ignore-user-config",
             "--ignore-rules",
+            # A misspelt override key is an error, not a silently ignored setting
+            # (measured: `-c mcp_servers.x.bogus=1` is refused under this flag).
+            "--strict-config",
             "--sandbox",
             "read-only",
             "-C",
@@ -81,6 +85,16 @@ class CodexBrain(HarnessBrain):
             f"{server}.args={json.dumps(args)}",
             "-c",
             f"{server}.startup_timeout_sec=90",
+            "-c",
+            f"{server}.tool_timeout_sec=120",
+            # Only the tools this persona is offered, pre-approved: with approvals off Codex
+            # refuses every MCP call that needs one (measured, "approval policy is never"),
+            # and nobody is there to answer. What the persona may do is decided by our
+            # server's guards and budget, and by the read-only sandbox around its shell.
+            "-c",
+            f"{server}.enabled_tools={json.dumps(offered_tool_names(spec))}",
+            "-c",
+            f'{server}.default_tools_approval_mode="approve"',
         ]
         if self.model:
             argv += ["-m", self.model]

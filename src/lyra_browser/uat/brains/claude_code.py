@@ -9,6 +9,7 @@ elicitation from the server is cancelled, which the server reads as a refusal.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 from pathlib import Path
@@ -61,6 +62,15 @@ class ClaudeCodeBrain(HarnessBrain):
             "--mcp-config",
             str(mcp_config),
             "--strict-mcp-config",
+            # No settings from anywhere: the operator's user settings carry their
+            # reply language, default model and effort, hooks and plugins, and their
+            # CLAUDE.md rides along. Measured with Claude Code 2.1.289: with them a
+            # persona answered in Korean for an English persona and the first request
+            # was 20,889 cache-creation tokens against 2,594 without. `--safe-mode`
+            # would also drop `--mcp-config` servers (measured), `--bare` needs an API
+            # key; an empty source list leaves auth and our MCP server alone.
+            "--setting-sources",
+            "",
             "--system-prompt-file",
             str(system_file),
             # No built-in tools: the persona reads screens, not files or shells.
@@ -106,9 +116,12 @@ class ClaudeCodeBrain(HarnessBrain):
             binary, spec, mcp_config=mcp_config, system_file=system_file, task_prompt=task_prompt
         )
         (folder / "argv.json").write_text(
-            __import__("json").dumps(argv, indent=2, ensure_ascii=False), encoding="utf-8"
+            json.dumps(argv, indent=2, ensure_ascii=False), encoding="utf-8"
         )
-        result = await run_process(argv, cwd=folder / "cwd", env=child_env(run_dir), log_dir=folder)
+        # Auto memory would give the run a memory directory of its own, keyed by the
+        # run's working directory: clutter in the operator's ~/.claude per persona.
+        env = child_env(run_dir, {"CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1"})
+        result = await run_process(argv, cwd=folder / "cwd", env=env, log_dir=folder)
         return self.parse(result.stdout, result.exit_code, result.stderr)
 
     def parse(self, stdout: str, exit_code: int | None, stderr: str = "") -> BrainInfo:
@@ -125,6 +138,7 @@ class ClaudeCodeBrain(HarnessBrain):
         info.input_tokens = int(usage.get("input_tokens") or 0)
         info.output_tokens = int(usage.get("output_tokens") or 0)
         info.cache_read_tokens = int(usage.get("cache_read_input_tokens") or 0)
+        info.cache_write_tokens = int(usage.get("cache_creation_input_tokens") or 0)
         cost = payload.get("total_cost_usd")
         info.cost_usd = float(cost) if isinstance(cost, int | float) else None
         session = payload.get("session_id")

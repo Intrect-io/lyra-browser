@@ -20,8 +20,9 @@ ENTRY = "https://start.example/"
 
 CLAUDE_STUB = """#!/usr/bin/env bash
 printf '%s\\n' "$@" > "$STUB_ARGV_FILE"
-printf 'CLAUDECODE=%s\\nCLAUDE_CODE_X=%s\\nLYRA_UAT_RUN_DIR=%s\\nPWD=%s\\n' \\
-  "${CLAUDECODE:-}" "${CLAUDE_CODE_X:-}" "${LYRA_UAT_RUN_DIR:-}" "$PWD" > "$STUB_ENV_FILE"
+printf 'CLAUDECODE=%s\\nCLAUDE_CODE_X=%s\\nLYRA_UAT_RUN_DIR=%s\\nPWD=%s\\nAUTOMEM=%s\\n' \\
+  "${CLAUDECODE:-}" "${CLAUDE_CODE_X:-}" "${LYRA_UAT_RUN_DIR:-}" "$PWD" \\
+  "${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-}" > "$STUB_ENV_FILE"
 cat <<'EOF'
 {
   "type": "result",
@@ -124,6 +125,10 @@ async def test_claude_code_builds_the_command_and_reads_the_result(tmp_path, mon
     assert argv[:2] == ["-p", "TASK PROMPT"]
     assert argv[argv.index("--output-format") + 1] == "json"
     assert "--strict-mcp-config" in argv and "--no-session-persistence" in argv
+    # The operator's settings (language, model, hooks, plugins, CLAUDE.md) stay out: an
+    # empty source list, not --safe-mode (which drops our MCP server) or --bare (API key).
+    assert argv[argv.index("--setting-sources") + 1] == ""
+    assert "--safe-mode" not in argv and "--bare" not in argv
     assert argv[argv.index("--tools") + 1] == ""
     assert argv[argv.index("--permission-prompts") + 1] == "none"
     assert argv[argv.index("--permission-mode") + 1] == "dontAsk"
@@ -142,6 +147,7 @@ async def test_claude_code_builds_the_command_and_reads_the_result(tmp_path, mon
 
     env = dict(line.split("=", 1) for line in env_file.read_text().splitlines())
     assert env["CLAUDECODE"] == "" and env["CLAUDE_CODE_X"] == ""
+    assert env["AUTOMEM"] == "1"
     assert env["LYRA_UAT_RUN_DIR"] == str(run_dir)
     assert Path(env["PWD"]) == run_dir / "harness" / "cwd"
     assert (run_dir / "harness" / "stdout.log").is_file()
@@ -194,6 +200,13 @@ async def test_codex_builds_the_command_and_reads_the_events(tmp_path, monkeypat
     assert argv[argv.index("-m") + 1] == "some-model"
     overrides = [argv[i + 1] for i, a in enumerate(argv) if a == "-c"]
     assert 'approval_policy="never"' in overrides
+    assert "--strict-config" in argv
+    # Approvals are off, so the persona's own tools must be pre-approved or every MCP call
+    # is refused (measured): and only those tools, not whatever else the server could offer.
+    assert 'mcp_servers.lyra.default_tools_approval_mode="approve"' in overrides
+    enabled = next(o for o in overrides if o.startswith("mcp_servers.lyra.enabled_tools="))
+    tools = json.loads(enabled.split("=", 1)[1])
+    assert "navigate" in tools and "finish" in tools and "publish" not in tools
     assert f"mcp_servers.lyra.command={json.dumps(sys.executable)}" in overrides
     assert any(o.startswith("mcp_servers.lyra.args=") and str(run_file) in o for o in overrides)
     # The prompt is the last argument and spans lines: role first, task last.
