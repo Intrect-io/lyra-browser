@@ -1,0 +1,14 @@
+# Where a run may go. Shared by every persona of a round.
+trusted_origins:
+  - example.com
+  - "*.example.com"
+# Sending (SUBMIT, UPLOAD) is pre-approved only on your own product. PUBLISH and
+# DOWNLOAD are never pre-approved; unattended, they are refused.
+trusted_send_origins:
+  - example.com
+  - "*.example.com"
+proxy: null
+# Requests matching these regexes are kept in full in network.jsonl (query string,
+# POST body); everything else is summarised. Analytics hits are the usual reason.
+network_capture:
+  - "google-analytics\\.com/g/collect"

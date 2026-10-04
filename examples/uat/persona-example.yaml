@@ -1,0 +1,22 @@
+# One persona. Defined by what changes its path — entry, width, language, account
+# state, goal, success criteria, budget, forbidden actions — not by a backstory.
+# Run it with:  lyra-uat run examples/uat/persona-example.yaml --target examples/uat/target-example.yaml
+id: p1
+name: Phone visitor from a search result
+entry_url: https://example.com/
+viewport: 390x844
+locale: en-US
+account: none
+goal: >
+  Find out what this site offers and whether there is a free way to try it,
+  without creating an account.
+success_criteria:
+  - Reaches a page that explains the offer in plain words.
+  - Finds the free or trial path, or establishes that none exists.
+step_budget: 20
+must_not:
+  - sign up or sign in
+  - enter payment details
+known_limits: []
+# uploads_allowed_dir: ~/.local/state/uat-assets   # offers upload_file, paths must live here
+extra_trusted_origins: []

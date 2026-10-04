@@ -1,0 +1,18 @@
+# Several personas against one target. Anonymous visitors run in parallel; personas
+# that share one account run one after another. Each persona is its own process
+# with its own browser profile.
+target_file: target-example.yaml
+brain:
+  backend: claude-code
+personas:
+  p1: persona-example.yaml
+  p2: persona-example.yaml      # in practice a different file per persona
+groups:
+  - name: anonymous
+    mode: parallel
+    personas: [p1]
+  - name: signed-in
+    mode: sequential
+    personas: [p2]
+concurrency: 4
+out_dir: uat-runs

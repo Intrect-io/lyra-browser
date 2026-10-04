@@ -1,0 +1,20 @@
+[
+  {
+    "id": "R1-03",
+    "severity": "major",
+    "url": "https://example.com/pricing",
+    "step": 4,
+    "expected": "The plan cards name what each plan includes.",
+    "actual": "Two cards show the same price with no difference stated.",
+    "round": "round-1"
+  },
+  {
+    "id": "R1-07",
+    "severity": "minor",
+    "url": "https://example.com/",
+    "step": 1,
+    "expected": "The free trial link is visible above the fold at 390px.",
+    "actual": "The link sits below the hero and nothing points to it.",
+    "round": "round-1"
+  }
+]

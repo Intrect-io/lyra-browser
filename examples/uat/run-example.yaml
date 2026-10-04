@@ -1,0 +1,20 @@
+# A full run file: persona + target + brain + round brief in one place.
+# Files are resolved relative to this one.
+persona_file: persona-example.yaml
+target_file: target-example.yaml
+brief_file: brief-example.md
+prior_findings_file: prior-findings-example.json
+brain:
+  backend: claude-code        # anthropic | openrouter | ollama | openai-compat | claude-code | codex
+  model: null                 # backend default
+  max_turns: 150
+  max_budget_usd: 5
+hooks:
+  before: null                # e.g. a script that seeds the profile; non-zero exit stops the run
+  after: null                 # e.g. an analytics check; its output lands in report.hooks
+limits:
+  wall_s: 1800
+  auto_screenshot: true
+  vision: on_demand
+out_dir: uat-runs
+headless: true

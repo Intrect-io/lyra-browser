@@ -35,9 +35,18 @@ dev = [
 patchright = [
     "patchright>=1.63,<2",
 ]
+# UAT mode (lyra_browser.uat): persona-driven acceptance runs with an LLM
+# "brain". The core server never imports these; each brain imports its SDK
+# lazily, so a server installed without this extra is unchanged.
+uat = [
+    "anthropic>=1,<2",
+    "openai>=1.60,<4",
+    "pyyaml>=6,<7",
+]
 
 [project.scripts]
 lyra-browser = "lyra_browser.__main__:main"
+lyra-uat = "lyra_browser.uat.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Intrect-io/lyra-browser"

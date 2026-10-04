@@ -30,4 +30,6 @@ testing/
 
 # Local review-tool artefacts
 .openswarm/
-tests/
+
+# UAT run directories (lyra-uat run / batch default out_dir)
+uat-runs/

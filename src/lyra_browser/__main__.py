@@ -8,6 +8,7 @@ remote/dev use.
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from .config import CLIENTS, Config
 from .server import build_server
@@ -40,6 +41,17 @@ def build_parser() -> argparse.ArgumentParser:
             "HERMES_HOME -> hermes)."
         ),
     )
+    parser.add_argument(
+        "--uat-run",
+        type=Path,
+        default=None,
+        metavar="RUN_JSON",
+        help=(
+            "Serve one UAT persona run over stdio: the run.json that `lyra-uat run` "
+            "wrote. Configuration comes from that file, not from the environment or "
+            "the other flags. Used by harness brains (Claude Code, Codex)."
+        ),
+    )
     return parser
 
 
@@ -57,6 +69,11 @@ def config_from_args(args: argparse.Namespace) -> Config:
 
 def main() -> None:
     args = build_parser().parse_args()
+    if args.uat_run is not None:
+        from .uat.server import serve_stdio
+
+        serve_stdio(args.uat_run)
+        return
     mcp = build_server(config_from_args(args))
     if args.http:
         mcp.run(transport="http", host=args.host, port=args.port)

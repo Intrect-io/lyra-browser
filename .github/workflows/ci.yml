@@ -16,6 +16,12 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,uat]"
       - name: Lint
         run: ruff check .
+      - name: Format
+        run: ruff format --check src tests scripts
+      # The unit suite runs on fakes: no browser is launched, so no Playwright
+      # download. The real-browser gates stay manual (scripts/verify_*_e2e.py).
+      - name: Test
+        run: pytest -q

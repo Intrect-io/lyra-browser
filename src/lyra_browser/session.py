@@ -449,6 +449,13 @@ class BrowserSession:
         # offered. A plain attribute, like route_handler, so this module need not
         # know about permissions.
         self.download_handler: object | None = None
+        # Installed by UAT mode (uat/observe.py): each is called with every tab the
+        # session adopts, so a run can listen to its requests and console. A plain
+        # list of callables, like download_handler, so this module need not know why.
+        self.page_observers: list[Any] = []
+        # What an observer raised, if any: an observer must not take the tab down,
+        # but a listener that silently never attached would be a quiet lie in the run.
+        self.observer_errors: list[str] = []
 
     @property
     def started(self) -> bool:
@@ -637,6 +644,7 @@ class BrowserSession:
         # that predates the download listener would keep every file it is offered, unjudged.
         for page in self._context.pages:
             self._watch_downloads(page)
+            self._observe(page)
 
     async def _install_guard(self) -> None:
         """Put the navigation guard in front of every document the browser will request.
@@ -766,7 +774,17 @@ class BrowserSession:
         (see ``_fallback_page``).
         """
         self._watch_downloads(page)
+        self._observe(page)
         self._page = page
+
+    def _observe(self, page: Page) -> None:
+        """Hand a tab to every registered observer. Best effort, like the download
+        listener, and like it per tab: a popup arrives through ``_adopt_page``."""
+        for observer in self.page_observers:
+            try:
+                observer(page)
+            except Exception as exc:  # noqa: BLE001 — recorded, never fatal for the tab
+                self.observer_errors.append(f"{type(exc).__name__}: {exc}")
 
     def _watch_downloads(self, page: Page) -> None:
         """Send the files this tab is offered to ``download_handler``.
