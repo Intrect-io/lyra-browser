@@ -196,7 +196,9 @@ def o_response(*calls, content=None, finish_reason="tool_calls"):
                 finish_reason=finish_reason,
             )
         ],
-        usage=SimpleNamespace(prompt_tokens=50, completion_tokens=5, prompt_tokens_details=None),
+        usage=SimpleNamespace(
+            prompt_tokens=50, completion_tokens=5, prompt_tokens_details=None, cost=0.01
+        ),
     )
 
 
@@ -243,6 +245,9 @@ async def test_openai_compat_loop_tool_messages_images_and_bad_json(tmp_path, pa
     assert recorder.finished and info.turns == 5 and info.input_tokens == 250
     first = fake.calls[0]
     assert first["model"] == "vendor/model" and first["parallel_tool_calls"] is False
+    # OpenRouter is asked what each request cost, and the brain adds it up.
+    assert first["extra_body"] == {"usage": {"include": True}}
+    assert info.cost_usd == pytest.approx(0.05)
     assert first["messages"][0] == {"role": "system", "content": "SYSTEM"}
     assert {t["function"]["name"] for t in first["tools"]} >= {"navigate", "finish"}
     # After the screenshot: a tool message, then a user message carrying the image.

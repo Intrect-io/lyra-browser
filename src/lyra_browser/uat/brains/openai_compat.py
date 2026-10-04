@@ -28,6 +28,8 @@ class Preset:
     # parameters, so there we rely on the prompt and sequential execution instead.
     parallel_tool_calls_param: bool
     extra_headers: dict[str, str] | None = None
+    # Sent as ``extra_body``: OpenRouter reports what a request cost when asked.
+    extra_body: dict[str, Any] | None = None
 
 
 PRESETS: dict[str, Preset] = {
@@ -39,6 +41,7 @@ PRESETS: dict[str, Preset] = {
             "HTTP-Referer": "https://github.com/Intrect-io/lyra-browser",
             "X-Title": "lyra-browser UAT",
         },
+        extra_body={"usage": {"include": True}},
     ),
     "ollama": Preset(
         base_url="https://ollama.com/v1",
@@ -109,6 +112,8 @@ class OpenAICompatBrain(LoopBrain):
         }
         if self.preset.parallel_tool_calls_param:
             request["parallel_tool_calls"] = False
+        if self.preset.extra_body:
+            request["extra_body"] = dict(self.preset.extra_body)
         request.update(self.spec.extra)
 
         info = BrainInfo(backend=self.backend, model=self.model)
@@ -131,6 +136,10 @@ class OpenAICompatBrain(LoopBrain):
                 info.output_tokens += int(getattr(usage, "completion_tokens", 0) or 0)
                 details = getattr(usage, "prompt_tokens_details", None)
                 info.cache_read_tokens += int(getattr(details, "cached_tokens", 0) or 0)
+                # Not part of the OpenAI schema: OpenRouter adds what the request cost.
+                cost = getattr(usage, "cost", None)
+                if isinstance(cost, int | float):
+                    info.cost_usd = round((info.cost_usd or 0.0) + float(cost), 6)
             if not response.choices:
                 raise BrainError(f"{self.backend}: empty response")
             choice = response.choices[0]

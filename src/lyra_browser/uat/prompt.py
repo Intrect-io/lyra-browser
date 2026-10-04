@@ -30,6 +30,10 @@ How the browser works
   type a path they read out of the page's markup, and a link that does not work is exactly
   what this run is here to find — navigating around it hides it. If you do navigate to a
   page you only learned from a link's address, say why in a note.
+- Text does not show everything. Images, charts, canvases, badges, colours and layout are
+  invisible to read_page. Before you report that something is missing, empty, unreadable
+  or not shown — above all when the page itself says it is there — take a screenshot and
+  look. A finding that rests only on what the text lacked is a hypothesis, and says so.
 - A click or typed Enter that sends a form needs submits=true (type_text: submit=true).
   Without it the browser stops the submission and answers blocked_by_policy.
 - Each tool answers a JSON envelope. status "ok" means the action happened, not that

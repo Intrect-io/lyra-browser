@@ -166,6 +166,8 @@ def test_prompts_name_the_report_language_and_the_click_rule():
     system = " ".join(build_system_prompt(english).split())  # the prompt wraps its lines
     assert "click the links and buttons you can see" in system
     assert "navigate is for the entry URL" in system
+    # Text misses images, canvases and layout: "missing" needs a screenshot first.
+    assert "take a screenshot and look" in system
 
 
 def test_batch_key_must_match_the_persona_id_inside_the_file(tmp_path):
