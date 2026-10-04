@@ -253,8 +253,9 @@ killed if it will not. What a harness leaves running after a normal exit is stop
   with it. Keep those two limits set. Stop such a run with SIGINT to the harness's process
   group.
 
-Process groups, signals and the `/proc` liveness check make this POSIX-only (Linux, macOS);
-it has not been run on Windows.
+This is POSIX code (process groups, signals). It was run on Linux only: where there is no
+`/proc` (macOS) it falls back to `killpg` alone for the liveness check, which has not been
+run, and Windows is not supported.
 
 ## Hooks
 
