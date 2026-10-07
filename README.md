@@ -710,15 +710,18 @@ lyra-browser                            # serve over stdio (what VEGA spawns)
 # or: lyra-browser --http --port 8765   # serve over HTTP for dev
 ```
 
+**Deploying it as a remote server (Cloudflare Containers):** see
+[docs/CLOUDFLARE.md](docs/CLOUDFLARE.md).
+
 ## Configuration (env)
 
 | Var | Default | Meaning |
 |---|---|---|
-| `LYRA_BROWSER_CLIENT` | detected | `vega`, `hermes` or `generic` (also `--client`). Picks default paths and window mode only, never permissions. Detected from `VEGA_DATA_DIR` → vega, `HERMES_HOME` → hermes. |
+| `LYRA_BROWSER_CLIENT` | detected | `vega`, `hermes`, `generic` or `remote` (also `--client`). Picks default paths, window mode and how captures reach the model — never permissions. `remote` is a server nobody sits at: headless, and `screenshot`/`read_image` attach the PNG as an MCP image. Detected from `VEGA_DATA_DIR` → vega, `HERMES_HOME` → hermes. |
 | `LYRA_BROWSER_DATA_DIR` | — | Base data dir (profile + audit). Overrides everything. |
 | `VEGA_DATA_DIR` | — | vega: data goes to `$VEGA_DATA_DIR/browser`. |
 | `HERMES_HOME` | `~/.hermes` | hermes: data goes to `$HERMES_HOME/browser`. |
-| `LYRA_BROWSER_HEADLESS` | auto | Run without a visible window (see Headless mode). Unset: headless for hermes, and on Linux with no `DISPLAY`/`WAYLAND_DISPLAY`; otherwise a window. |
+| `LYRA_BROWSER_HEADLESS` | auto | Run without a visible window (see Headless mode). Unset: headless for hermes and remote, and on Linux with no `DISPLAY`/`WAYLAND_DISPLAY`; otherwise a window. |
 | `LYRA_BROWSER_VIEWPORT` | `1280x800` | `WIDTHxHEIGHT` of the page (`390x844` for a phone layout). Headless uses it as the emulated viewport; headful as the window size. Anything unreadable falls back to the default. |
 | `LYRA_BROWSER_PROXY` | unset | Route the browser through a proxy, e.g. `socks5://100.x.y.z:1080`. For UAT runs that must not share the operator's egress IP, since per-IP rate limits, quotas and IP-based analytics exclusion all key on it. Unset means a direct connection. |
 | `LYRA_BROWSER_REQUIRE_APPROVAL` | `true` | Ask before risky actions. `false` sets the consent channel to `off`. |
@@ -738,6 +741,7 @@ lyra-browser                            # serve over stdio (what VEGA spawns)
 | `LYRA_BROWSER_DOWNLOAD_TIMEOUT` | `120` | Seconds a declared download may take to arrive once it has started before it is cancelled (`download_failed`, `timeout`). |
 | `LYRA_BROWSER_CHANNEL` | — | Force one channel (`chrome`/`msedge`). Unset = try chrome→msedge→bundled. |
 | `LYRA_BROWSER_ALLOW_BUNDLED` | `true` | Allow bundled-Chromium fallback (only exists after `playwright install`). |
+| `LYRA_BROWSER_AUDIT_STDERR` | `false` | Also write every audit record to stderr as one JSON line. For a host whose disk is ephemeral but whose stderr is collected (the Cloudflare image sets it). |
 | `LYRA_BROWSER_DRIVER` | `auto` | Which Playwright to launch with: `auto` takes `patchright` when installed and falls back to `playwright`; either name pins it. `open_browser` reports the one in use as `driver`. |
 | `LYRA_BROWSER_GUARD` | `route` | Where the navigation guard stands: `route` (Playwright's route) or `cdp` (a second DevTools connection: every redirect hop judged, cache on, DataDome lets the browser in, a loopback debugging port, `guard_lost` if the guard fails). See Guard backends. |
 | `LYRA_UAT_CLAUDE_BIN` | `claude` on `PATH` | The Claude Code executable the `claude-code` UAT brain runs. See UAT mode. |

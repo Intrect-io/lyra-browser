@@ -14,7 +14,6 @@ separate process leaves the same files for the report as our own loop does.
 
 from __future__ import annotations
 
-import base64
 import json
 import re
 import time
@@ -27,9 +26,10 @@ from typing import Any
 
 from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.tools.tool import ToolResult
-from mcp.types import ImageContent, TextContent
+from mcp.types import TextContent
 
 from ..audit import _redact as redact_args
+from ..vision import payload_of
 from .spec import UAT_TOOLS
 
 ACTION_TOOLS: frozenset[str] = frozenset(
@@ -74,8 +74,6 @@ NO_ATTEMPT: frozenset[str] = frozenset(
 )
 """Statuses of an action that never reached the page. They are recorded but do
 not spend the budget: a wrong selector is a mistake, not a step the persona took."""
-
-IMAGE_TOOLS: frozenset[str] = frozenset({"screenshot", "read_image"})
 
 RESULT_HEAD_CHARS = 300
 
@@ -423,19 +421,6 @@ class RunRecorder:
         }
 
 
-def _payload_of(result: ToolResult) -> Any:
-    if isinstance(result.structured_content, dict):
-        return result.structured_content
-    for block in result.content or []:
-        text = getattr(block, "text", None)
-        if isinstance(text, str):
-            try:
-                return json.loads(text)
-            except ValueError:
-                return text
-    return None
-
-
 def _refusal(envelope: dict) -> ToolResult:
     return ToolResult(
         content=[TextContent(type="text", text=json.dumps(envelope, ensure_ascii=False))],
@@ -443,27 +428,11 @@ def _refusal(envelope: dict) -> ToolResult:
     )
 
 
-def _image_block(path: str) -> ImageContent | None:
-    try:
-        data = Path(path).read_bytes()
-    except OSError:
-        return None
-    return ImageContent(
-        type="image", data=base64.b64encode(data).decode("ascii"), mimeType="image/png"
-    )
-
-
 class UatMiddleware(Middleware):
-    """Numbers, guards, records and illustrates every tool call of a run.
+    """Numbers, guards, records and illustrates every tool call of a run."""
 
-    ``vision`` attaches the PNG of ``screenshot``/``read_image`` results as an
-    image block, so a client that renders MCP images shows the model the page
-    rather than a path on a machine it cannot read.
-    """
-
-    def __init__(self, recorder: RunRecorder, *, vision: bool = True) -> None:
+    def __init__(self, recorder: RunRecorder) -> None:
         self.recorder = recorder
-        self.vision = vision
 
     async def on_call_tool(self, context: MiddlewareContext, call_next) -> ToolResult:
         name = context.message.name
@@ -481,16 +450,11 @@ class UatMiddleware(Middleware):
                 step, {"status": "error", "error": type(exc).__name__}, is_error=True
             )
             raise
-        payload = _payload_of(result)
+        payload = payload_of(result)
         shot = None
         status = payload.get("status", "ok") if isinstance(payload, dict) else "ok"
         if step.action and self.recorder.auto_screenshot and status not in NO_ATTEMPT:
             shot = await self.recorder.take_screenshot()
         self.recorder.complete(step, payload, is_error=result.is_error, screenshot=shot)
         self.recorder.write_observations()
-        if self.vision and name in IMAGE_TOOLS and isinstance(payload, dict):
-            path = payload.get("image_path")
-            block = _image_block(str(path)) if path else None
-            if block is not None:
-                result.content = [*(result.content or []), block]
         return result

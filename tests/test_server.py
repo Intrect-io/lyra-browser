@@ -42,7 +42,7 @@ def _words(text: str) -> set[str]:
     return set(re.findall(r"[A-Za-z_][\w-]*", text))
 
 
-@pytest.mark.parametrize("client", ["vega", "hermes", "generic"])
+@pytest.mark.parametrize("client", ["vega", "hermes", "generic", "remote"])
 @pytest.mark.parametrize("headless", [True, False])
 def test_instructions_name_the_envelopes_tools_return(client, headless):
     """A status no instruction explains is one the model meets cold, mid-task."""
@@ -57,7 +57,7 @@ def test_instructions_name_the_envelopes_tools_return(client, headless):
     }.issubset(words)
 
 
-@pytest.mark.parametrize("client", ["vega", "hermes", "generic"])
+@pytest.mark.parametrize("client", ["vega", "hermes", "generic", "remote"])
 def test_instructions_say_how_to_address_an_element(client):
     words = _words(instructions_for(Config(client=client)))
     assert {
@@ -70,3 +70,16 @@ def test_instructions_say_how_to_address_an_element(client):
         "total_chars",
         "next_offset",
     }.issubset(words)
+
+
+def test_healthz_answers_over_http_without_a_browser(tmp_path):
+    """A platform's liveness ping must not need a session or a token."""
+    from starlette.testclient import TestClient
+
+    cfg = Config(client="remote")
+    cfg.data_dir = tmp_path
+    cfg.__post_init__()
+    with TestClient(build_server(cfg).http_app()) as http:
+        reply = http.get("/healthz")
+    assert reply.status_code == 200
+    assert reply.text == "ok"

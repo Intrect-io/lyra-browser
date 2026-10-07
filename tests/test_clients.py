@@ -189,6 +189,23 @@ def test_each_client_is_told_how_it_sees_a_capture():
     assert "vision_analyze" in hermes
     assert "attached to your next turn" not in hermes
     assert "inline=true" in _instructions("generic", headless=True)
+    remote = _instructions("remote", headless=True)
+    assert "attach the image" in remote
+    assert "inline=true" not in remote
+
+
+def test_remote_is_headless_even_where_a_display_exists(clean_env):
+    """clean_env sets DISPLAY; a remote client still has nobody at the window."""
+    cfg = Config.from_env(client="remote")
+    assert cfg.client == "remote"
+    assert cfg.headless is True
+    assert cfg.attended is False
+
+
+def test_audit_stderr_is_off_unless_asked(clean_env, monkeypatch):
+    assert Config.from_env(client="remote").audit_stderr is False
+    monkeypatch.setenv("LYRA_BROWSER_AUDIT_STDERR", "true")
+    assert Config.from_env(client="remote").audit_stderr is True
 
 
 async def test_build_server_uses_the_config_it_was_given(tmp_path):

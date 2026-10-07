@@ -30,6 +30,7 @@ from ..server import instructions_for
 from ..session import BrowserSession
 from ..tools import register_all
 from ..tools import uat as uat_tools
+from ..vision import VisionMiddleware
 from .observe import PageObservers
 from .recorder import RunRecorder, UatMiddleware
 from .spec import UAT_TOOLS, RunSpec
@@ -174,7 +175,11 @@ async def build_uat_server(
         }
 
     recorder.browser_info = browser_info
-    mcp.add_middleware(UatMiddleware(recorder, vision=spec.limits.vision == "on_demand"))
+    # Vision is the outer layer: it attaches the image after the recorder has
+    # seen — and traced — the plain result.
+    if spec.limits.vision == "on_demand":
+        mcp.add_middleware(VisionMiddleware())
+    mcp.add_middleware(UatMiddleware(recorder))
     return mcp, ctx, recorder
 
 

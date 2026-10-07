@@ -18,9 +18,9 @@ from pathlib import Path
 from .origin import Origin, parse_origin
 
 # Which agent harness is on the other end of the wire. It decides defaults
-# only — where data and captures go, and whether a window is expected — never
-# how permissions are judged.
-CLIENTS = frozenset({"vega", "hermes", "generic"})
+# only — where data and captures go, whether a window is expected, and how
+# captures reach the model — never how permissions are judged.
+CLIENTS = frozenset({"vega", "hermes", "generic", "remote"})
 
 
 def _env(name: str, default: str | None = None) -> str | None:
@@ -148,11 +148,12 @@ def _default_headless(client: str) -> bool:
 
     Hermes answers through chat — CLI, Telegram, Slack — not at the browser,
     and does not hand its servers a display, so its default is headless. A
-    Linux process with no display cannot open a window at all; launching
-    headful there is a crash, headless is a working session that reports
-    ``attended=false``.
+    remote client reaches a server nobody sits in front of, so it is headless
+    too. A Linux process with no display cannot open a window at all;
+    launching headful there is a crash, headless is a working session that
+    reports ``attended=false``.
     """
-    return client == "hermes" or not _has_display()
+    return client in ("hermes", "remote") or not _has_display()
 
 
 def _as_int(value: str | None, default: int) -> int:
@@ -388,6 +389,9 @@ class Config:
     # _default_headless): headful where someone can watch, headless where
     # nobody can. An explicit True/False always wins.
     headless: bool | None = None
+    # Mirror every audit record to stderr as well as audit.jsonl. A container's
+    # disk is gone when it sleeps; its stderr is collected by the platform.
+    audit_stderr: bool = False
     # Explicit channel override (e.g. "chrome", "msedge"). When unset, the session
     # tries the user's installed browsers in order — see browser_candidates().
     channel: str | None = None
@@ -522,6 +526,7 @@ class Config:
             channel=_env("LYRA_BROWSER_CHANNEL") or None,
             proxy=_env("LYRA_BROWSER_PROXY") or None,
             allow_bundled_fallback=_as_bool(_env("LYRA_BROWSER_ALLOW_BUNDLED"), default=True),
+            audit_stderr=_as_bool(_env("LYRA_BROWSER_AUDIT_STDERR"), default=False),
             require_approval=_as_bool(_env("LYRA_BROWSER_REQUIRE_APPROVAL"), default=True),
             consent_channel=(
                 _env("LYRA_BROWSER_CONSENT_CHANNEL")

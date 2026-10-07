@@ -9,6 +9,8 @@ docs/HERMES_INTEGRATION.md.
 from __future__ import annotations
 
 from fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse, Response
 
 from .approval import CollaborationState
 from .audit import AuditLog
@@ -16,6 +18,7 @@ from .config import Config
 from .context import ServerContext
 from .session import BrowserSession
 from .tools import register_all
+from .vision import VisionMiddleware
 
 _ATTENDED = """\
 lyra-browser drives a single visible Chromium window the user shares with you.
@@ -46,6 +49,10 @@ _SEEING = {
         "- screenshot and read_image return an image_path, not pixels. Open the\n"
         "  file with your client's image tool; pass inline=true only if you cannot\n"
         "  read this machine's files."
+    ),
+    "remote": (
+        "- screenshot and read_image attach the image to their result: look at it\n"
+        "  there. image_path is a file on the server, which you cannot open."
     ),
 }
 
@@ -144,9 +151,18 @@ def build_server(config: Config | None = None) -> FastMCP:
     ctx = ServerContext(
         config=cfg,
         session=BrowserSession(cfg),
-        audit=AuditLog(cfg.audit_path),
+        audit=AuditLog(cfg.audit_path, mirror_stderr=cfg.audit_stderr),
         collab=CollaborationState(require_approval=cfg.require_approval),
     )
     mcp = FastMCP("lyra-browser", instructions=instructions_for(cfg))
     register_all(mcp, ctx)
+    if cfg.client == "remote":
+        mcp.add_middleware(VisionMiddleware())
+
+    # Liveness for a platform that has to know the server is up before it
+    # routes to it (a container's ping). Serves HTTP only; stdio ignores it.
+    @mcp.custom_route("/healthz", methods=["GET"], include_in_schema=False)
+    async def healthz(_request: Request) -> Response:
+        return PlainTextResponse("ok")
+
     return mcp

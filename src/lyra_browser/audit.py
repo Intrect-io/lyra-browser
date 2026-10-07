@@ -8,14 +8,18 @@ acts inside a session sharing the user's logins.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 
 class AuditLog:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, mirror_stderr: bool = False) -> None:
         self._path = path
+        # Each record is also written, unprefixed, as one JSON line on stderr —
+        # for hosts whose disk is ephemeral but whose stderr is collected.
+        self._mirror_stderr = mirror_stderr
 
     def record(
         self,
@@ -44,13 +48,19 @@ class AuditLog:
             entry["origin"] = origin
         if initiator is not None:
             entry["initiator"] = initiator
+        line = json.dumps(entry, ensure_ascii=False)
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
             with self._path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                fh.write(line + "\n")
         except OSError:
             # Auditing must not break the agent loop; surfacing happens elsewhere.
             pass
+        if self._mirror_stderr:
+            try:
+                print(line, file=sys.stderr, flush=True)
+            except (OSError, ValueError):
+                pass
 
 
 # Argument keys whose values should never hit the on-disk log verbatim.
