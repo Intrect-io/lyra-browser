@@ -1,0 +1,17 @@
+# .env holds API keys; nothing secret may enter the image.
+.git
+.venv
+.env
+.env.*
+worktrees
+testing
+tests
+scripts
+examples
+docs
+deploy
+**/__pycache__
+.pytest_cache
+.ruff_cache
+.openswarm
+**/node_modules

@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lyra-browser",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-05",
+  // Reached at <name>.<subdomain>.workers.dev only; per-version preview URLs
+  // would be extra public hostnames for no benefit.
+  "workers_dev": true,
+  "preview_urls": false,
+  // Container stderr — the audit trail — is collected only with this on.
+  "observability": { "enabled": true },
+  "containers": [
+    {
+      "class_name": "LyraBrowserContainer",
+      "image": "../../Dockerfile",
+      "image_build_context": "../..",
+      // 1 vCPU / 6 GiB. Chrome renders too slowly on standard-1's half vCPU,
+      // and `basic` (1 GiB) is too small for it.
+      "instance_type": "standard-2",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "LYRA_BROWSER", "class_name": "LyraBrowserContainer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["LyraBrowserContainer"] }]
+}
