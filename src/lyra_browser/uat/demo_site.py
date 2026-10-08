@@ -45,6 +45,12 @@ PRICING = """<!doctype html><title>Pricing</title>
 <p><a id="external" href="__ALT__checkout">Checkout with our payment partner</a></p>
 <p><a href="/">Home</a></p>"""
 
+# A bot check as a site shows it: the page is there, the content is not. Used to see that
+# a run stops and reports it, instead of reading the check as the product.
+GATE = """<!doctype html><title>Just a moment...</title>
+<h1>Just a moment...</h1>
+<p>Checking your browser before accessing the site.</p>"""
+
 TRY = """<!doctype html><title>Try it free</title>
 <h1>Try it free</h1>
 <p>Upload a track to hear a 30-second preview. No account needed.</p>
@@ -91,6 +97,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(PRICING.replace("__ALT__", self.alt_base))
         elif path == "/try":
             self._send(TRY)
+        elif path == "/gate":
+            self._send(GATE)
         elif path == "/verify":
             self._send(VERIFY.replace("__CODE__", self.visual_code))
         elif path == "/collect":

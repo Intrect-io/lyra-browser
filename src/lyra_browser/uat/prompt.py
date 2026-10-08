@@ -42,6 +42,10 @@ How the browser works
 - needs_approval means the destination is outside the sites under test. You cannot
   approve it and nobody will: note what the site tried to do and stay where you are.
   Do not call again with confirm=true.
+- status "challenge" (or a "challenge" field in read_page) means the page is a bot check
+  (a robot test, a press-and-hold, a block) and not the page you asked for. Do not try to
+  get past it or wait for it to clear: say what you saw, report it as blocked if the goal
+  needs it, and carry on with what remains.
 - budget_exhausted means the persona's action budget is spent: reads still work;
   report what remains and call finish. blocked_by_uat_policy means the server refused
   something the persona must never do; do not try another way.

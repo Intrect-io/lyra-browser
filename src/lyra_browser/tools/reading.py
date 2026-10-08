@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from fastmcp import FastMCP
 
 from ..capture import envelope, save_capture, take
+from ..challenge import hint_for, observe
 from ..context import ServerContext, acquire_page
 
 _MODES = frozenset({"text", "tree"})
@@ -557,6 +558,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         }
         if truncated:
             result["next_offset"] = end
+        if found := await observe(page):
+            # The text above may be the check itself; the hint says what to do about it.
+            result["challenge"] = found.as_dict()
+            result["hint"] = hint_for(found, ctx.config.attended)
         return result
 
     @mcp.tool

@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastmcp import FastMCP
 
 from ..approval import TakeoverActive
+from ..challenge import hint_for, observe
 from ..context import (
     ServerContext,
     acquire_page,
@@ -288,6 +289,17 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
                 # Declared, and the URL was a page: there is no file to wait for.
                 result["status"] = "download_not_started"
                 result["hint"] = _NOT_A_FILE_HINT
+            elif found := await observe(page, result["http_status"]):
+                # The page answered, but it is a bot check, not the page asked for.
+                result["status"] = "challenge"
+                result["challenge"] = found.as_dict()
+                result["hint"] = hint_for(found, ctx.config.attended)
+                ctx.audit.record(
+                    "challenge_seen",
+                    {"vendor": found.vendor, "kind": found.kind},
+                    status=found.kind,
+                    **audit_kw,
+                )
             return result
 
     @mcp.tool
