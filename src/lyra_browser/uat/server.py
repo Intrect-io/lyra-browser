@@ -71,7 +71,8 @@ def build_config(spec: RunSpec, run_dir: Path) -> Config:
         # ``elicit``, never ``auto``: our own in-memory client declares no elicitation
         # capability, and with ``auto`` that would fall back to honouring the
         # model's own confirm=true.
-        consent_channel="elicit",
+        consent_channel="autonomous" if spec.target.policy == "autonomous" else "elicit",
+        denied_origins=tuple(spec.target.deny_origins),
         # Unattended: nobody answers, so a prompt is a refusal — fail fast.
         consent_timeout_s=1.0,
         trusted_origins=tuple(spec.all_trusted_origins()),

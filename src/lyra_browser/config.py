@@ -205,7 +205,7 @@ def _as_optional_bool(value: str | None) -> bool | None:
 # one there is. Anything unrecognised goes back to the declared default.
 _CHOICES: dict[str, frozenset[str]] = {
     "enforcement_mode": frozenset({"observe", "enforce"}),
-    "consent_channel": frozenset({"auto", "elicit", "legacy", "off"}),
+    "consent_channel": frozenset({"auto", "elicit", "legacy", "off", "autonomous"}),
     "driver": frozenset({"auto", "patchright", "playwright"}),
     "guard_backend": frozenset({"route", "cdp"}),
 }
@@ -418,6 +418,10 @@ class Config:
     #              not implement elicitation yet and the alternative is denying
     #              every gated action.
     #   "off"    — do not ask.
+    #   "autonomous" — nobody is there to ask, so answer: every site may be navigated to and
+    #              interacted with, and a declared SUBMIT / UPLOAD / DOWNLOAD is approved
+    #              (single-use, audited as ``autonomous``). PUBLISH, opaque origins
+    #              (file:, data:, javascript:) and ``denied_origins`` are still refused.
     consent_channel: str = "auto"
     # How long an unanswered prompt holds its tool call before it becomes a
     # denial. Five minutes suits a person at a screen; a gateway nobody is
@@ -435,6 +439,9 @@ class Config:
     # not become send-trusted by being roaming-trusted. Same entry forms. Never PUBLISH or
     # DOWNLOAD, and each approval stays single-use.
     trusted_send_origins: tuple[str, ...] = ()
+    # Sites that are refused whatever else says yes: the trusted lists, a live grant and the
+    # ``autonomous`` channel all step aside. Same entry forms. Empty by default.
+    denied_origins: tuple[str, ...] = ()
     # How long a grant stays usable. Effects that cannot be undone ignore this
     # and are single-use regardless (see permission.py).
     grant_ttl_s: float = 600.0
@@ -491,6 +498,13 @@ class Config:
         # Keep only what could be read as a site; the text left is canonical.
         self.trusted_origins = parse_trusted_origins(self.trusted_origins).entries
         self.trusted_send_origins = parse_trusted_origins(self.trusted_send_origins).entries
+        self.denied_origins = parse_trusted_origins(self.denied_origins).entries
+
+    def origin_denied(self, origin: Origin) -> str | None:
+        """The ``denied_origins`` entry that matches ``origin``, or None."""
+        if not self.denied_origins:
+            return None
+        return parse_trusted_origins(self.denied_origins).entry_for(origin)
 
     @property
     def attended(self) -> bool:
@@ -537,6 +551,7 @@ class Config:
             trusted_send_origins=parse_trusted_origins(
                 _env("LYRA_BROWSER_TRUSTED_SEND_ORIGINS")
             ).entries,
+            denied_origins=parse_trusted_origins(_env("LYRA_BROWSER_DENIED_ORIGINS")).entries,
             grant_ttl_s=_as_float(_env("LYRA_BROWSER_GRANT_TTL"), default=600.0),
             scope_release_grace_s=_as_float(
                 _env("LYRA_BROWSER_RELEASE_GRACE"),

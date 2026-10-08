@@ -206,3 +206,56 @@ def test_yaml_files_load_when_pyyaml_is_present(tmp_path):
         yaml.safe_dump({"persona": PERSONA, "target": TARGET}, sort_keys=False), encoding="utf-8"
     )
     assert load_run_spec(run).persona.viewport.width == 390
+
+
+# --------------------------------------------------------------------------
+# target.policy — closed (default) or autonomous
+# --------------------------------------------------------------------------
+
+
+def _run_doc(target: dict) -> dict:
+    return {
+        "persona": {
+            "id": "p1",
+            "name": "Visitor",
+            "entry_url": "https://example.com/",
+            "goal": "Find the price.",
+        },
+        "target": target,
+    }
+
+
+def test_closed_policy_still_needs_a_site():
+    from lyra_browser.uat.spec import RunSpec
+
+    with pytest.raises(ValueError, match="trusted_origins is empty"):
+        RunSpec.model_validate(_run_doc({}))
+
+
+def test_autonomous_policy_needs_no_site_list_and_reaches_the_config(tmp_path):
+    from lyra_browser.uat.server import build_config
+    from lyra_browser.uat.spec import RunSpec
+
+    spec = RunSpec.model_validate(
+        _run_doc({"policy": "autonomous", "deny_origins": ["bank.example"]})
+    )
+    cfg = build_config(spec, tmp_path)
+
+    assert cfg.consent_channel == "autonomous"
+    assert cfg.denied_origins == ("https://bank.example",)
+
+
+def test_closed_policy_pins_elicit(tmp_path):
+    from lyra_browser.uat.server import build_config
+    from lyra_browser.uat.spec import RunSpec
+
+    spec = RunSpec.model_validate(_run_doc({"trusted_origins": ["example.com"]}))
+
+    assert build_config(spec, tmp_path).consent_channel == "elicit"
+
+
+def test_unknown_policy_is_an_error():
+    from lyra_browser.uat.spec import RunSpec
+
+    with pytest.raises(ValueError):
+        RunSpec.model_validate(_run_doc({"policy": "yolo", "trusted_origins": ["example.com"]}))

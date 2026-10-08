@@ -296,15 +296,32 @@ def enforced_policies(spec: RunSpec) -> list[str]:
     """What the server, not the prompt, guarantees for this run."""
     rules = [
         f"step_budget={spec.persona.step_budget} (actions beyond it are refused)",
-        "trusted_origins (navigation outside the target is refused; nobody can approve it)",
-        "consent=elicit (the model's confirm=true is not an approval)",
+        *(
+            [
+                "consent=autonomous (any site may be navigated to; a declared SUBMIT/UPLOAD/"
+                "DOWNLOAD is approved and audited as autonomous; PUBLISH and file:/data: "
+                "are refused)"
+            ]
+            if spec.target.policy == "autonomous"
+            else [
+                "trusted_origins (navigation outside the target is refused; nobody can approve it)",
+                "consent=elicit (the model's confirm=true is not an approval)",
+            ]
+        ),
+        *(
+            [f"deny_origins={spec.target.deny_origins} (refused whatever else says yes)"]
+            if spec.target.deny_origins
+            else []
+        ),
         "card_number_input (a value that looks like a payment card is never typed)",
     ]
     if spec.persona.uploads_allowed_dir is not None:
         rules.append(f"uploads_allowed_dir={spec.persona.uploads_allowed_dir}")
     else:
         rules.append("no uploads (upload_file is not offered)")
-    if spec.target.trusted_send_origins:
+    if spec.target.policy == "autonomous":
+        rules.append("DOWNLOAD and UPLOAD are approved when declared; PUBLISH is refused")
+    elif spec.target.trusted_send_origins:
         rules.append("sends only on trusted_send_origins; PUBLISH and DOWNLOAD are refused")
     else:
         rules.append("no sends (SUBMIT/UPLOAD are refused everywhere)")

@@ -18,6 +18,11 @@ answer given in advance for sites they always use. It is recorded as
 the INTERACT it implies. It becomes a real grant, because the enforcement layer
 reads only the permission store. Single-use scopes are never on it.
 
+A fourth is the ``autonomous`` channel, for a run nobody attends: it approves what a
+task on the open web needs (every site, and a declared SUBMIT / UPLOAD / DOWNLOAD), is
+recorded as ``consent_channel=autonomous``, and still refuses PUBLISH, opaque origins and
+``denied_origins``.
+
 Everything that is not an explicit approval is a denial: no live request context,
 an unsupported client, a timeout, a decline, a cancel, a transport error.
 """
@@ -160,6 +165,17 @@ class ConsentBroker:
         # approved submission into an unlimited licence: nothing spends the
         # grant until the request goes out, so every call in between was waved
         # through on someone else's yes.
+        denied_entry = self._config.origin_denied(origin)
+        if denied_entry is not None:
+            # Before every yes: a grant, a trusted list and the autonomous channel all
+            # answer for sites in general, and this list names the ones that are not.
+            return self._record(
+                action,
+                origin,
+                capability,
+                Decision(False, "denied", f"origin is on denied_origins (matched {denied_entry})"),
+                subject=subject,
+            )
         reusable = not self._store.is_one_shot(origin, capability)
         if reusable and self._store.check(session, origin, capability, initiator):
             # Check, never consume. Spending is the enforcement layer's job, at
@@ -267,6 +283,8 @@ class ConsentBroker:
         channel = self._config.consent_channel
         if channel == "off":
             return Decision(True, "off")
+        if channel == "autonomous":
+            return self._ask_autonomous(origin, capability)
         if channel in ("elicit", "auto"):
             decision = await self._ask_via_elicit(action, origin, capability, detail, subject)
             if decision.channel != "unavailable":
@@ -281,6 +299,21 @@ class ConsentBroker:
             # overridden by the model asserting confirm=true.
             return self._ask_legacy(legacy_confirm, fallback_from=decision.detail)
         return self._ask_legacy(legacy_confirm)
+
+    @staticmethod
+    def _ask_autonomous(origin: Origin, capability: Capability) -> Decision:
+        """Nobody is there to ask, so answer — for what a run on the open web must do.
+
+        Releasing content to an audience is never part of that, and an opaque origin
+        (``file:``, ``data:``, ``javascript:``) names no site that could be vouched for:
+        a local file is not "the web". Both stay refusals; the approval that is given
+        is still the single-use grant ``request`` mints, spent by the request itself.
+        """
+        if capability is Capability.PUBLISH:
+            return Decision(False, "denied", "autonomous channel never approves PUBLISH")
+        if origin.is_opaque:
+            return Decision(False, "denied", "autonomous channel does not approve opaque origins")
+        return Decision(True, "autonomous", "approved by the autonomous channel")
 
     def _ask_legacy(self, legacy_confirm: bool, fallback_from: str = "") -> Decision:
         """The model's own assertion, recorded as exactly that."""

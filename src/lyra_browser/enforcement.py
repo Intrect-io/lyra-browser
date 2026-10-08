@@ -364,6 +364,9 @@ def classify(request: Any) -> Intent | None:
     )
 
 
+_AUTONOMOUS_ARRIVAL = "autonomous channel"
+
+
 class NavigationGuard:
     """Judges outgoing navigations against live grants.
 
@@ -493,11 +496,15 @@ class NavigationGuard:
                 intent.initiator,
                 intent.url,
             )
-        self._record(
-            intent,
-            allowed,
-            reason=f"operator-trusted origin (matched {trusted})" if trusted and allowed else "",
-        )
+        if trusted and allowed:
+            reason = (
+                "approved by the autonomous channel"
+                if trusted == _AUTONOMOUS_ARRIVAL
+                else f"operator-trusted origin (matched {trusted})"
+            )
+        else:
+            reason = ""
+        self._record(intent, allowed, reason=reason)
         if allowed or self._mode == "observe":
             return True
         self.refusals += 1
@@ -520,6 +527,15 @@ class NavigationGuard:
             return ""
         if self._config.consent_channel == "off":
             return ""
+        if self._config.origin_denied(intent.subject) is not None:
+            return ""
+        if self._config.consent_channel == "autonomous":
+            # No list to match: nobody could be asked about the hop, and every site is
+            # arrivable. The lease is minted all the same, so the trail shows it.
+            self._perms.grant(
+                self.session_key, intent.subject, Capability.NAVIGATE, intent.initiator, intent.url
+            )
+            return _AUTONOMOUS_ARRIVAL
         entry = parse_trusted_origins(self._config.trusted_origins).entry_for(intent.subject)
         if entry is None:
             return ""

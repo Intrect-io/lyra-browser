@@ -1082,3 +1082,78 @@ async def test_the_guard_does_not_honour_the_list_when_asking_is_off(make_ctx):
             json.loads(x) for x in ctx.config.audit_path.read_text().splitlines() if x.strip()
         )
     )
+
+
+# --------------------------------------------------------------------------
+# autonomous channel — nobody to ask, so answer, within limits
+# --------------------------------------------------------------------------
+
+OTHER = parse_origin("https://other.example/")
+
+
+@pytest.mark.parametrize(
+    "capability",
+    [
+        Capability.NAVIGATE,
+        Capability.INTERACT,
+        Capability.SUBMIT,
+        Capability.UPLOAD,
+        Capability.DOWNLOAD,
+    ],
+)
+async def test_autonomous_approves_what_a_task_needs_and_says_so(make_broker, capability):
+    broker, store, cfg = make_broker("autonomous")
+
+    decision = await broker.request(action="x", origin=OTHER, capability=capability)
+
+    assert decision.allowed
+    assert decision.channel == "autonomous"
+    assert _entries(cfg)[-1]["args"]["consent_channel"] == "autonomous"
+    assert decision.granted is not None
+
+
+async def test_autonomous_never_publishes(make_broker):
+    broker, store, _ = make_broker("autonomous")
+
+    decision = await broker.request(
+        action="publish", origin=SITE, capability=Capability.PUBLISH, legacy_confirm=True
+    )
+
+    assert not decision.allowed
+    assert not store.check("default", SITE, Capability.PUBLISH)
+
+
+@pytest.mark.parametrize("capability", [Capability.NAVIGATE, Capability.SUBMIT])
+async def test_autonomous_does_not_approve_a_local_file(make_broker, capability):
+    broker, _, _ = make_broker("autonomous")
+
+    decision = await broker.request(action="x", origin=LOCAL, capability=capability)
+
+    assert not decision.allowed
+
+
+async def test_autonomous_single_use_scope_is_not_reusable(make_broker):
+    broker, store, _ = make_broker("autonomous")
+
+    first = await broker.request(action="x", origin=OTHER, capability=Capability.SUBMIT)
+    store.consume("default", OTHER, Capability.SUBMIT, None)
+
+    assert first.allowed
+    assert not store.check("default", OTHER, Capability.SUBMIT)
+
+
+@pytest.mark.parametrize("channel", ["autonomous", "off", "legacy"])
+async def test_a_denied_origin_beats_every_yes(make_broker, channel):
+    broker, store, cfg = make_broker(channel, trusted=("other.example",))
+    cfg.denied_origins = ("other.example",)
+    store.grant("default", OTHER, Capability.NAVIGATE)
+
+    decision = await broker.request(
+        action="navigate",
+        origin=OTHER,
+        capability=Capability.NAVIGATE,
+        legacy_confirm=True,
+    )
+
+    assert not decision.allowed
+    assert "denied_origins" in decision.detail

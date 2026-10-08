@@ -77,10 +77,24 @@ Reporting — this is the deliverable
 """
 
 
+AUTONOMOUS_ADDENDUM = """
+Autonomous run (this replaces the rules above about staying on the sites under test)
+- Nobody is watching and nobody can be asked. You may follow the task to any site it
+  needs, and the browser approves a declared submit, upload or download by itself.
+- That makes your actions real. Submit, upload or download only what the task asks for.
+  Publishing, paying and entering card numbers are refused by the browser; do not try.
+- A needs_approval or blocked_by_uat_policy answer is final for that action: report what
+  was in the way and carry on with what remains, or finish with outcome blocked.
+"""
+
+
 def build_system_prompt(spec: RunSpec) -> str:
     """The role, with the tools this run actually offers named."""
     offered = ", ".join([*spec.offered_tools(), "report_finding", "verdict", "note", "finish"])
-    return SYSTEM_PROMPT + f"\nTools available in this run: {offered}.\n"
+    prompt = SYSTEM_PROMPT + f"\nTools available in this run: {offered}.\n"
+    if spec.target.policy == "autonomous":
+        prompt += AUTONOMOUS_ADDENDUM
+    return prompt
 
 
 def _bullets(items: list[str], empty: str = "none") -> str:

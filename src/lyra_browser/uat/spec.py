@@ -116,7 +116,14 @@ class Target(Strict):
     """Where the run may go. Entries use the ``trusted_origins`` grammar of the
     server (``example.com``, ``*.example.com``, ``https://app.example.com``)."""
 
-    trusted_origins: list[str] = Field(min_length=1)
+    trusted_origins: list[str] = Field(default_factory=list)
+    # "closed": the run stays on trusted_origins and nothing outside can be approved
+    # (acceptance of one's own product). "autonomous": nobody is there to ask, so the
+    # server approves what a task on the open web needs: any site, and a declared
+    # SUBMIT / UPLOAD / DOWNLOAD. PUBLISH, file:/data: URLs, card numbers and
+    # ``deny_origins`` stay refused, and every approval is audited as ``autonomous``.
+    policy: Literal["closed", "autonomous"] = "closed"
+    deny_origins: list[str] = Field(default_factory=list)
     # Sites where sending is pre-approved too (SUBMIT, UPLOAD): the product under
     # test, never a third party. PUBLISH and DOWNLOAD stay asked, and in an
     # unattended run "asked" means refused.
@@ -125,6 +132,13 @@ class Target(Strict):
     # Requests whose URL matches one of these regexes are kept in full
     # (query string, POST body) in ``network.jsonl``; everything else is a summary.
     network_capture: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _closed_needs_a_site(self) -> Target:
+        # A closed run with no trusted site cannot even load its entry page.
+        if self.policy == "closed" and not self.trusted_origins:
+            raise ValueError("target.trusted_origins is empty: list the site under test")
+        return self
 
     @field_validator("network_capture")
     @classmethod

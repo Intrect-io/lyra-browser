@@ -500,3 +500,49 @@ def test_a_post_redirected_to_another_origin_needs_its_own_approval(make_guard):
 
     assert guard.decide(first) is True
     assert guard.decide(hop) is False, "the body does not follow the redirect on the first yes"
+
+
+# --------------------------------------------------------------------------
+# autonomous channel — arrival anywhere is a lease, except where denied
+# --------------------------------------------------------------------------
+
+
+async def test_autonomous_lets_a_hop_to_any_site_arrive(make_guard):
+    guard, perms, cfg = make_guard("enforce")
+    cfg.consent_channel = "autonomous"
+    route = FakeRoute()
+
+    await guard(route, FakeRequest(url="https://other.example/"))
+
+    assert route.calls == [("continue",)]
+    assert _entries(cfg)[-1]["args"]["reason"] == "approved by the autonomous channel"
+
+
+async def test_autonomous_still_refuses_a_denied_origin(make_guard):
+    guard, perms, cfg = make_guard("enforce")
+    cfg.consent_channel = "autonomous"
+    cfg.denied_origins = ("other.example",)
+    route = FakeRoute()
+
+    await guard(route, FakeRequest(url="https://other.example/"))
+
+    assert route.calls == [("fulfill", 204)]
+
+
+async def test_autonomous_does_not_license_an_undeclared_send(make_guard):
+    guard, perms, cfg = make_guard("enforce")
+    cfg.consent_channel = "autonomous"
+    route = FakeRoute()
+
+    await guard(route, FakeRequest(method="POST"))
+
+    assert route.calls == [("fulfill", 204)]
+
+
+async def test_closed_default_still_refuses_a_new_site(make_guard):
+    guard, perms, cfg = make_guard("enforce")
+    route = FakeRoute()
+
+    await guard(route, FakeRequest(url="https://other.example/"))
+
+    assert route.calls == [("fulfill", 204)]
