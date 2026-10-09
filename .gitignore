@@ -31,6 +31,9 @@ testing/
 # Local review-tool artefacts
 .openswarm/
 
+# Files moved aside by a cleanup instead of being deleted
+trash/
+
 # UAT run directories (lyra-uat run / batch default out_dir)
 uat-runs/
 

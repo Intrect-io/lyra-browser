@@ -1,42 +1,42 @@
-# lyra-browser
+# lyra
 
-A **headful, collaborative browser** MCP server for the VEGA agent
-harness. VEGA drives a single **visible Chromium window** that the user can watch
-and **take over** at any time — co-browsing, not headless scraping.
+A **headful, collaborative browser** MCP server for AI agents. The agent drives a
+single **visible Chromium window** that the user can watch and **take over** at any
+time — co-browsing, not headless scraping.
 
-The same server runs **headless** under Hermes, where the user
-is reached through chat rather than at a window — see
-[docs/HERMES_INTEGRATION.md](docs/HERMES_INTEGRATION.md).
+The same server runs **headless** when nobody sits at a window — for example under
+Hermes, where the user is reached through chat (see
+[docs/HERMES_INTEGRATION.md](docs/HERMES_INTEGRATION.md)), or as a remote server (see
+[docs/CLOUDFLARE.md](docs/CLOUDFLARE.md)).
 
-> **Renamed from vega-browser.** The old `VEGA_BROWSER_*` environment variables and
-> an existing `~/.vega-browser` data directory are still honoured; the `LYRA_BROWSER_*`
-> names win when both are set.
+> **Names.** The project is **lyra**; the repository is `lyra-browser`. The command
+> (`lyra-browser`), the Python package (`lyra_browser`) and the environment variables
+> (`LYRA_BROWSER_*`) keep the `lyra-browser` names for now. The UAT runner is `lyra-uat`.
 
 > Built on Playwright (headful, persistent profile) and exposed over
-> [FastMCP](https://github.com/jlowin/fastmcp), so VEGA picks it up through its
-> existing MCP integration with near-zero glue.
+> [FastMCP](https://github.com/jlowin/fastmcp), so any MCP client can use it with a
+> single entry in its configuration.
 
 ## Why
 
-VEGA is local-first and model-agnostic. This plugin gives it a browser the user
-shares: the agent reads the page, clicks, and types, while the user can step in
-for the things an agent must not do alone (passwords, CAPTCHAs, 2FA, payments)
-and grab full control whenever they want. Every action is written to an
-append-only audit trail.
+An agent that is local-first and model-agnostic needs a browser the user shares: the
+agent reads the page, clicks, and types, while the user can step in for the things an
+agent must not do alone (passwords, CAPTCHAs, 2FA, payments) and grab full control
+whenever they want. Every action is written to an append-only audit trail.
 
 ## Architecture
 
 ```
-VEGA agent loop ──(MCP: stdio/http)──> lyra-browser server ──> Playwright ──> visible Chromium window
-                                              │                                      ▲
-                                              ├─ audit.jsonl (every action)          │ user watches / takes over
-                                              └─ approval + takeover gating ──────────┘
+agent loop ──(MCP: stdio/http)──> lyra-browser server ──> Playwright ──> visible Chromium window
+                                        │                                      ▲
+                                        ├─ audit.jsonl (every action)          │ user watches / takes over
+                                        └─ approval + takeover gating ─────────┘
 ```
 
-- **Standalone MCP server** — registered in VEGA's `mcp.json` (no VEGA code change).
-- **Python + Playwright** — same runtime as VEGA; pins track the harness
-  (`fastmcp>=3.2`, `playwright>=1.59` — one minor above the 1.58.0 VEGA bundles, because element refs need it; see
-  [Addressing an element](#addressing-an-element-aria-ref)).
+- **Standalone MCP server** — registered in the MCP client's configuration; the client
+  needs no code change.
+- **Python + Playwright** — pins are `fastmcp>=3.2` and `playwright>=1.59`. Element refs
+  (`aria_snapshot(mode="ai")`) need 1.59; see [Addressing an element](#addressing-an-element-aria-ref).
 - **Dedicated headful window** — `launch_persistent_context(headless=False)` with a
   persistent profile, so logins survive across sessions. One server at a time holds
   that profile (an `flock` on `<data_dir>/profile.lock`, taken when the browser opens,
@@ -44,11 +44,11 @@ VEGA agent loop ──(MCP: stdio/http)──> lyra-browser server ──> Playw
   empty profile at `<data_dir>-instances/<pid>/profile` instead of failing, and
   `open_browser` says so (`profile: "instance"`, "no saved logins in this instance").
 - **No setup tax** — reuses the user's **installed Chrome/Edge** by default
-  (`channel="chrome"` → `"msedge"` → bundled Chromium), so an end user with only
-  VEGA.app needs **no pip and no `playwright install`**. If no browser is found,
-  tools return a `browser_unavailable` envelope for VEGA's UI to prompt an install.
+  (`channel="chrome"` → `"msedge"` → bundled Chromium), so `playwright install` is not
+  needed when either is present. If no browser is found, tools return a
+  `browser_unavailable` envelope that the client can turn into an install prompt.
 - **Full preset** — human-in-the-loop (highlight, ask-the-user, approval gate),
-  takeover/handoff, audit trail, CI + lint + pre-commit.
+  takeover/handoff, bot-check detection, audit trail, CI + lint + pre-commit.
 
 ## Tools
 
@@ -149,7 +149,8 @@ to an audience, cannot be recalled.
 when nothing matches). `offset` and `max_chars` page through long output:
 `total_chars` is the full length, `truncated` says more follows and `next_offset`
 is where to continue. Tree pages break on whole lines, so a ref is never cut in
-half.
+half. A reply that finds a bot check also carries `challenge` and a `hint`; see
+[Bot checks](#bot-checks-challenge).
 
 ### Addressing an element: `aria-ref`
 
@@ -164,10 +165,10 @@ counted) with a hint to read the tree again; refs get no waiting window, because
 they cannot appear later.
 
 **Requires `playwright>=1.59`.** Refs come from `aria_snapshot(mode="ai")`, which
-1.59 introduced; `pyproject.toml` still floors at 1.58 because that is what a
-VEGA runtime ships. On 1.58 the tree still works but answers `refs: false` and its
-lines carry no ref — address elements with `role=link[name="Pricing"]` or `text=`
-selectors instead.
+1.59 introduced; `pyproject.toml` still floors at 1.58 so that existing 1.58
+installations keep working. On 1.58 the tree still works but answers `refs: false`
+and its lines carry no ref — address elements with `role=link[name="Pricing"]` or
+`text=` selectors instead.
 
 ### When an action cannot be done: `click` / `type_text`
 
@@ -277,7 +278,31 @@ an `error` before any prompt. A page that draws itself after loading needs
 [Downloads](#downloads) for `download=true` and `download_blocked`. Only when the
 driver announced a download the browser never reported does it answer
 `{"status": "download_started", "url", "requested_url", "hint"}`; this server then wrote
-no file to the download dir.
+no file to the download dir. If the page that answered is a bot check, `navigate`
+answers `status: "challenge"`; see [Bot checks](#bot-checks-challenge).
+
+### Bot checks: `challenge`
+
+A page that asks "are you a robot" is not a failure of the tool, and it is not a page
+to get past. It is a page a person has to answer. lyra names the check and stops:
+
+- `navigate` answers `status: "challenge"` when the page it landed on is a bot check,
+  and `read_page` adds a `challenge` field (the text is still returned, so the agent
+  can see what it is).
+- The reply carries `challenge: {vendor, kind, evidence}`. `kind` is `interactive`
+  (a person has to solve it: a checkbox, a puzzle, press-and-hold) or `blocked` (refused
+  outright, e.g. an HTTP 403 "Access Denied"). `vendor` is `cloudflare`, `datadome`,
+  `recaptcha`, `hcaptcha`, `perimeterx`, or `unidentified` when the text names a check
+  without a known host.
+- The `hint` depends on who is watching. With a person at the window it says to ask them
+  (`ask_user_to_do`, then `read_page` to see whether it cleared). With nobody there it
+  says not to wait and not to look for another way past, to report the task as blocked
+  (`finish` with `outcome=blocked`) and carry on with what remains.
+
+Nothing solves, waits out or retries a check. Detection reads the frame hosts, the page
+title and the first 3000 characters of visible text; an article that quotes a check's
+wording further down is not named. A detection in `navigate` is audited as
+`challenge_seen`; `read_page` only reports it in its reply.
 
 ### Hover and scroll
 
@@ -377,18 +402,16 @@ an `img`, a `canvas`, an `svg`, a chart) write a PNG to disk and return its
 **path**:
 
 ```json
-{"status": "ok", "image_path": "…/uploads/browser/page-20260917T123557Z-fd1a0721.png",
+{"status": "ok", "image_path": "…/captures/page-20260917T123557Z-fd1a0721.png",
  "mime_type": "image/png", "width": 1280, "height": 800, "bytes": 115889}
 ```
 
-The file is the handoff. Measured on VEGA: a tool result is shown to the model
-as its text blocks, so a base64 PNG inside the JSON arrives as tens of
-thousands of tokens of prose and no picture. A path costs nothing, and the
-client attaches the file to the model's next turn as an image. Because VEGA
-attaches only files under its own uploads root, captures default to
-`$VEGA_DATA_DIR/uploads/browser` whenever `VEGA_DATA_DIR` is set — no
-configuration for the model to be able to look. `inline=true` adds the base64
-for a client with no access to this filesystem.
+The file is the handoff. Measured on the same client: a tool result is shown to the
+model as its text blocks, so a base64 PNG inside the JSON arrives as tens of
+thousands of tokens of prose and no picture. A path costs nothing, and a client that
+can read the server's files attaches the file to the model's next turn as an image.
+Captures go to `<data_dir>/captures` unless `LYRA_BROWSER_CAPTURE_DIR` says otherwise.
+`inline=true` adds the base64 for a client with no access to this filesystem.
 
 Captures are written atomically and pruned oldest-first
 (`LYRA_BROWSER_CAPTURE_KEEP`, default 200), so an agent that looks every turn
@@ -541,10 +564,19 @@ model cannot forge the answer. Only a client that cannot be asked at all — no
 elicitation handler, no live request — falls back to honouring `confirm=true`,
 and the audit records `consent_channel=legacy` with the reason. A decline, a
 cancel and a timeout are *answers*: the model asserting `confirm=true` never
-overrides one. VEGA does not pass an elicitation handler yet, so it takes the
-fallback today; wiring one is what turns the gate from a convention into a
-boundary, and needs no change here. Hermes does pass one: its approval prompt
-answers, and its value-less accept is read as the yes it is.
+overrides one. A client that does not pass an elicitation handler takes that
+fallback; wiring one is what turns the gate from a convention into a boundary, and
+needs no change here. Hermes does pass one: its approval prompt answers, and its
+value-less accept is read as the yes it is.
+
+**Autonomous runs.** When nobody is there to answer, `LYRA_BROWSER_CONSENT_CHANNEL=autonomous`
+(or `target.policy: autonomous` in a UAT run) approves what a task on the open web
+needs: navigation to any site, and a declared `SUBMIT`, `UPLOAD` or `DOWNLOAD`. Each
+approval is audited as `consent_channel=autonomous`, so a run's side effects can be
+listed afterwards. It still refuses `PUBLISH`, `file:`/`data:`/`javascript:` origins,
+and any site in `LYRA_BROWSER_DENIED_ORIGINS` (same entry forms as the trusted list,
+and it wins over every other yes). The default stays `auto`/`elicit`, so nothing
+changes unless the operator chooses it.
 
 **Trusted origins.** Every new site costs one prompt, and a prompt nobody
 answers holds its tool call for `LYRA_BROWSER_CONSENT_TIMEOUT` (default 300s)
@@ -693,22 +725,20 @@ a page's service worker must not answer navigations; `route` where an open loopb
 port is unacceptable. Every `scripts/verify_*_e2e.py` gate runs on either:
 `LYRA_BROWSER_GUARD=cdp python scripts/verify_tabs_e2e.py`.
 
-## How it reaches the user
+## Installation
 
-**End users (VEGA.app):** they do *not* run pip or `playwright install`. VEGA
-bundles the `playwright` Python package in its own runtime, and this server drives
-the user's **already-installed Chrome or Edge** — zero downloads. If they have
-neither, a `browser_unavailable` envelope tells VEGA's UI to prompt a one-click
-Chrome install. See [docs/VEGA_INTEGRATION.md](docs/VEGA_INTEGRATION.md).
-
-**Developers (working on this repo):**
+Developers working on this repo:
 
 ```bash
 pip install -e ".[dev]"
 python -m playwright install chromium   # only needed if you have no system Chrome
-lyra-browser                            # serve over stdio (what VEGA spawns)
+lyra-browser                            # serve over stdio (the default, what an MCP client spawns)
 # or: lyra-browser --http --port 8765   # serve over HTTP for dev
 ```
+
+An end user needs no pip and no `playwright install` when Chrome or Edge is installed:
+the server drives that browser. If neither is found, the tools answer
+`browser_unavailable` so the client can prompt for an install.
 
 **Deploying it as a remote server (Cloudflare Containers):** see
 [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md).
@@ -717,23 +747,23 @@ lyra-browser                            # serve over stdio (what VEGA spawns)
 
 | Var | Default | Meaning |
 |---|---|---|
-| `LYRA_BROWSER_CLIENT` | detected | `vega`, `hermes`, `generic` or `remote` (also `--client`). Picks default paths, window mode and how captures reach the model — never permissions. `remote` is a server nobody sits at: headless, and `screenshot`/`read_image` attach the PNG as an MCP image. Detected from `VEGA_DATA_DIR` → vega, `HERMES_HOME` → hermes. |
+| `LYRA_BROWSER_CLIENT` | detected | `generic`, `hermes` or `remote` (also `--client`). Picks default paths, window mode and how captures reach the model — never permissions. `remote` is a server nobody sits at: headless, and `screenshot`/`read_image` attach the PNG as an MCP image. Detected from `HERMES_HOME` → hermes; otherwise `generic`. |
 | `LYRA_BROWSER_DATA_DIR` | — | Base data dir (profile + audit). Overrides everything. |
-| `VEGA_DATA_DIR` | — | vega: data goes to `$VEGA_DATA_DIR/browser`. |
 | `HERMES_HOME` | `~/.hermes` | hermes: data goes to `$HERMES_HOME/browser`. |
 | `LYRA_BROWSER_HEADLESS` | auto | Run without a visible window (see Headless mode). Unset: headless for hermes and remote, and on Linux with no `DISPLAY`/`WAYLAND_DISPLAY`; otherwise a window. |
 | `LYRA_BROWSER_VIEWPORT` | `1280x800` | `WIDTHxHEIGHT` of the page (`390x844` for a phone layout). Headless uses it as the emulated viewport; headful as the window size. Anything unreadable falls back to the default. |
 | `LYRA_BROWSER_PROXY` | unset | Route the browser through a proxy, e.g. `socks5://100.x.y.z:1080`. For UAT runs that must not share the operator's egress IP, since per-IP rate limits, quotas and IP-based analytics exclusion all key on it. Unset means a direct connection. |
 | `LYRA_BROWSER_REQUIRE_APPROVAL` | `true` | Ask before risky actions. `false` sets the consent channel to `off`. |
-| `LYRA_BROWSER_CONSENT_CHANNEL` | `auto` | `auto` asks the user over MCP and falls back to `confirm=true` only on a client that cannot be asked; `elicit` pins asking and denies otherwise; `legacy` always takes the model's word; `off` does not ask. |
+| `LYRA_BROWSER_CONSENT_CHANNEL` | `auto` | `auto` asks the user over MCP and falls back to `confirm=true` only on a client that cannot be asked; `elicit` pins asking and denies otherwise; `legacy` always takes the model's word; `off` does not ask; `autonomous` approves what an unattended run needs, except what `DENIED_ORIGINS` names (see Permissions). |
 | `LYRA_BROWSER_ENFORCEMENT` | `enforce` | `observe` records what it would have blocked without blocking: navigations go through, and an undeclared download is saved (`observed: true`, audited `would_block`) instead of cancelled. |
 | `LYRA_BROWSER_GRANT_TTL` | `600` | Seconds a grant stays usable. Single-use ones ignore this. |
 | `LYRA_BROWSER_TRUSTED_ORIGINS` | — | Sites pre-approved for `NAVIGATE`/`INTERACT`, comma- or whitespace-separated: `https://host[:port]`, a bare `host` (https only), or `*.example.com` (https subdomains, not the apex). Never covers `SUBMIT`/`UPLOAD`/`PUBLISH`/`DOWNLOAD`. See Trusted origins. |
 | `LYRA_BROWSER_TRUSTED_SEND_ORIGINS` | — | Sites where *sending* is also pre-approved — `SUBMIT` and `UPLOAD` — for acceptance runs against your own product. Same entry forms, **separate list**: a site in `TRUSTED_ORIGINS` is not send-trusted by being there. Never `PUBLISH` or `DOWNLOAD`; each approval stays single-use, and it steps aside during a takeover. Audited as `consent_channel=trusted_send`. |
+| `LYRA_BROWSER_DENIED_ORIGINS` | — | Sites refused whatever else says yes: the trusted lists, a live grant and the `autonomous` channel all step aside. Same entry forms. |
 | `LYRA_BROWSER_CONSENT_TIMEOUT` | `300` | Seconds a prompt waits for an answer before it counts as a denial (`timed out waiting for the user`). The tool call is held that long, so for an unattended Hermes gateway set it lower — e.g. `60`. |
 | `LYRA_BROWSER_RELEASE_GRACE` | `2` | Seconds before a finished action's unused single-use scope is reclaimed. |
 | `LYRA_BROWSER_OWNER_IDLE_TIMEOUT` | `900` | Seconds a session may hold the browser without using it. Handing it on closes the window. |
-| `LYRA_BROWSER_CAPTURE_DIR` | — | Where `screenshot`/`read_image` write PNGs. Default: vega `$VEGA_DATA_DIR/uploads/browser` (where VEGA attaches images), hermes `$HERMES_HOME/cache/browser` (where Hermes' vision may read), else `<data_dir>/captures`. |
+| `LYRA_BROWSER_CAPTURE_DIR` | — | Where `screenshot`/`read_image` write PNGs. Default: hermes `$HERMES_HOME/cache/browser` (where Hermes' vision may read), else `<data_dir>/captures`. |
 | `LYRA_BROWSER_CAPTURE_KEEP` | `200` | Captures kept on disk; oldest are deleted first. `0` keeps all. |
 | `LYRA_BROWSER_DOWNLOAD_DIR` | — | Where declared downloads are saved. Default `<data_dir>/downloads`. |
 | `LYRA_BROWSER_DOWNLOAD_KEEP` | `200` | Saved downloads kept; oldest are deleted first, and only files this server saved (tracked in a ledger in the dir). `0` keeps all. |
@@ -758,7 +788,7 @@ lyra-uat run examples/uat/demo/run.yaml      # one persona, Claude Code plays it
 lyra-uat batch examples/uat/demo/batch.yaml  # two personas in parallel, one process each
 ```
 
-A run leaves a directory: `report.json` (and `report.md`), `trace.jsonl`, `events.jsonl`, `captures/`, `network.jsonl`, `console.jsonl`, and the browser's own `audit.jsonl`. Persona, target, brain, hooks and limits are YAML or JSON; `lyra-uat schema run|batch|report` prints the JSON Schemas. Details, the report format and each brain's requirements are in [docs/UAT.md](docs/UAT.md).
+A run leaves a directory: `report.json` (and `report.md`), `trace.jsonl`, `events.jsonl`, `captures/`, `network.jsonl`, `console.jsonl`, and the browser's own `audit.jsonl`. Persona, target, brain, hooks and limits are YAML or JSON; `lyra-uat schema run|batch|report` prints the JSON Schemas. A run that should act without anyone to ask sets `target.policy: autonomous`; the default is `closed`, which keeps the run on its trusted sites. Details, the report format and each brain's requirements are in [docs/UAT.md](docs/UAT.md).
 
 ## Headless mode
 
@@ -871,11 +901,12 @@ example `python scripts/verify_browser_e2e.py --headless-only`, or headful under
 
 ## Status
 
-The server, session manager, tools, permission layer, enforcement and audit are
-implemented, unit-tested (no browser needed) and exercised end-to-end
-against real sites with a real Chrome — ten rounds over eleven sites, 187 judged
-navigations. Not yet driven by a live VEGA session; that is the next milestone,
-and it is what would let `consent_channel=elicit` replace the `confirm` flag.
+The server, session manager, tools, permission layer, enforcement, bot-check
+detection and audit are implemented, unit-tested (no browser needed) and exercised
+end-to-end against real sites with a real Chrome — ten rounds over eleven sites, 187
+judged navigations. Not yet driven by a live MCP client that implements elicitation;
+that is the next milestone, and it is what would let `consent_channel=elicit` replace
+the `confirm` flag.
 
 ## License
 
