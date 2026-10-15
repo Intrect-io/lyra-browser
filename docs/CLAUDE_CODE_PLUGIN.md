@@ -45,8 +45,9 @@ provide them. That is what this plugin does:
   `uv sync --frozen` from the committed `uv.lock` (or `python3 -m venv` plus
   `pip install` when `uv` is not on `PATH`), writes a stamp, and logs to
   `${CLAUDE_PLUGIN_DATA}/bootstrap.log`. `${CLAUDE_PLUGIN_DATA}` is
-  `~/.claude/plugins/data/lyra-browser/`: it survives plugin updates and is
-  removed on uninstall.
+  `~/.claude/plugins/data/<plugin>-<marketplace>/`: `lyra-browser-lyra-browser`
+  for a marketplace install, `lyra-browser-inline` under `--plugin-dir`
+  (measured). It survives plugin updates and is removed on uninstall.
 - `.mcp.json` points the MCP server at `scripts/claude-plugin/launch.sh`,
   which runs the same bootstrap (a matching stamp returns at once) and then
   `exec`s `venv/bin/lyra-browser --client claude-code`. Neither script writes to
@@ -88,7 +89,7 @@ in your shell.
 | Denied sites | `LYRA_BROWSER_DENIED_ORIGINS` | Refused whatever else says yes. |
 | Consent timeout | `LYRA_BROWSER_CONSENT_TIMEOUT` | Seconds a dialog waits before the action counts as denied (default 300). |
 | Navigation guard backend | `LYRA_BROWSER_GUARD` | `route` or `cdp`; see the README's Guard backends. |
-| Headless | `LYRA_BROWSER_HEADLESS` | Unset: a window wherever one can open. On Linux with no `DISPLAY`/`WAYLAND_DISPLAY` the server is headless regardless, and reports `attended=false`. |
+| Headless | `LYRA_BROWSER_HEADLESS` | Unset: a window wherever one can open, and headless (`attended=false`) on Linux with no `DISPLAY`/`WAYLAND_DISPLAY`. Set to off, it asks for a window even there, and Chrome fails to launch without a reachable X server. |
 
 The consent channel is pinned to `elicit`: the server asks through MCP
 elicitation and never falls back to the model's own `confirm=true`. Every
@@ -96,6 +97,14 @@ other `LYRA_BROWSER_*` variable from the README works through your shell
 environment, which the server inherits.
 
 ## What a session looks like
+
+The `claude -p` gate below measured consent, denial and image delivery. The
+interactive parts of this list (the dialog as rendered, the screenshot shown in
+the transcript, a second concurrent session getting an instance profile) follow
+Claude Code's documentation and lyra's unit tests and are **not yet measured**
+in an interactive session. Installing from the marketplace (`source: "."`,
+copied into the plugin cache) is likewise not yet exercised; only
+`--plugin-dir`, which loads the tree in place, is.
 
 - **Permission dialogs.** Going to a new site, and each send, upload, download
   or publish, raises an elicitation that Claude Code shows as a form with
@@ -135,10 +144,10 @@ In `claude -p` with `--permission-prompts none`, an elicitation is cancelled,
 which the server reads as a denial: nothing outside the trusted sites can be
 navigated to, and nothing can be sent. That is the behaviour the UAT brain
 (`docs/UAT.md`) relies on, and it is why the UAT harness keeps the `generic`
-client rather than this one. For an unattended run that should approve its own
-declared actions, set `LYRA_BROWSER_CONSENT_CHANNEL=autonomous` in the shell
-that starts Claude Code; it does not override the plugin's `elicit`, so use
-the UAT spec's `target.policy: autonomous` instead.
+client rather than this one. The plugin's `.mcp.json` pins
+`LYRA_BROWSER_CONSENT_CHANNEL=elicit`, so a shell variable cannot loosen it. An
+unattended run that should approve its own declared actions belongs to
+`lyra-uat` with `target.policy: autonomous`, not to this plugin.
 
 ## Develop and test
 
@@ -185,7 +194,8 @@ not auto-update unless the user turns it on under `/plugin` → Marketplaces).
 - **No lyra tools in the session.** `/mcp` shows `plugin:lyra-browser:lyra`
   and its state. `claude --debug` writes the server's stderr, including the
   bootstrap's messages, to `~/.claude/debug/<session-id>.txt`. The bootstrap
-  log is `~/.claude/plugins/data/lyra-browser/bootstrap.log`.
+  log is `bootstrap.log` in that data directory
+  (`~/.claude/plugins/data/lyra-browser-lyra-browser/` for a marketplace install).
 - **`CLAUDE_PLUGIN_DATA is not set`.** The launcher was run outside Claude
   Code. From a shell, run `lyra-browser` from a venv of your own instead.
 - **A window never appears on Linux.** `/lyra-browser:doctor` shows the
