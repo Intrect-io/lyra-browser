@@ -194,6 +194,30 @@ def test_each_client_is_told_how_it_sees_a_capture():
     assert "inline=true" not in remote
 
 
+def test_claude_code_is_a_person_at_this_machine(clean_env):
+    """Headful where a window can open, data beside generic's, never detected."""
+    cfg = Config.from_env(client="claude-code")
+    assert cfg.client == "claude-code"
+    assert cfg.headless is False
+    assert cfg.attended is True
+    assert cfg.data_dir == clean_env / "home" / ".lyra-browser"
+    assert cfg.capture_dir == cfg.data_dir / "captures"
+    assert Config.from_env().client == "generic"
+
+
+def test_claude_code_without_a_display_is_headless_like_generic(clean_env, monkeypatch):
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    assert Config.from_env(client="claude-code").headless is True
+
+
+def test_claude_code_is_told_the_image_is_in_the_result():
+    text = _instructions("claude-code", headless=False)
+    assert "attach the image" in text
+    assert "inline=true" not in text
+    assert "which you cannot open" not in text
+
+
 def test_remote_is_headless_even_where_a_display_exists(clean_env):
     """clean_env sets DISPLAY; a remote client still has nobody at the window."""
     cfg = Config.from_env(client="remote")

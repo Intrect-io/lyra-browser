@@ -1,0 +1,48 @@
+{
+  "name": "lyra-browser",
+  "displayName": "lyra browser",
+  "version": "0.1.0",
+  "description": "A persistent, logged-in Chromium that Claude drives and you can watch and take over. Navigation, form sending, uploads, downloads and publishing each ask you first through a dialog; a guard layer enforces the answer against every request, whatever caused it.",
+  "author": { "name": "Intrect", "url": "https://github.com/Intrect-io" },
+  "homepage": "https://github.com/Intrect-io/lyra-browser/blob/master/docs/CLAUDE_CODE_PLUGIN.md",
+  "repository": "https://github.com/Intrect-io/lyra-browser",
+  "license": "MIT",
+  "keywords": ["browser", "playwright", "mcp", "co-browsing", "automation"],
+  "userConfig": {
+    "trusted_origins": {
+      "type": "string",
+      "title": "Trusted sites",
+      "description": "Sites you are not asked about before navigating: https://host, bare host, or *.example.com, separated by commas. Never covers sending a form, uploading, downloading or publishing."
+    },
+    "trusted_send_origins": {
+      "type": "string",
+      "title": "Send-trusted sites",
+      "description": "Sites where sending a form and uploading are also pre-approved, for acceptance runs against your own product. Separate list: a trusted site is not send-trusted by being trusted."
+    },
+    "denied_origins": {
+      "type": "string",
+      "title": "Denied sites",
+      "description": "Sites refused whatever else says yes. Same forms as trusted sites."
+    },
+    "consent_timeout": {
+      "type": "number",
+      "title": "Consent timeout (seconds)",
+      "description": "How long a permission dialog waits for your answer before the action counts as denied.",
+      "default": 300,
+      "min": 5,
+      "max": 3600
+    },
+    "guard": {
+      "type": "string",
+      "title": "Navigation guard backend",
+      "description": "route judges the first request of a navigation through Playwright; cdp judges every redirect hop from a second DevTools connection over a loopback debugging port.",
+      "options": ["route", "cdp"],
+      "default": "route"
+    },
+    "headless": {
+      "type": "boolean",
+      "title": "Headless",
+      "description": "Run without a visible window. Leave unset for a window wherever one can open; with no window, highlight, ask-the-user and takeover answer unattended."
+    }
+  }
+}

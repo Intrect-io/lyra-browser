@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from lyra_browser.config import Config
+from lyra_browser.config import CLIENTS, Config
 from lyra_browser.server import build_server, instructions_for
 
 README = Path(__file__).resolve().parent.parent / "README.md"
@@ -42,7 +42,7 @@ def _words(text: str) -> set[str]:
     return set(re.findall(r"[A-Za-z_][\w-]*", text))
 
 
-@pytest.mark.parametrize("client", ["vega", "hermes", "generic", "remote"])
+@pytest.mark.parametrize("client", sorted(CLIENTS))
 @pytest.mark.parametrize("headless", [True, False])
 def test_instructions_name_the_envelopes_tools_return(client, headless):
     """A status no instruction explains is one the model meets cold, mid-task."""
@@ -57,7 +57,7 @@ def test_instructions_name_the_envelopes_tools_return(client, headless):
     }.issubset(words)
 
 
-@pytest.mark.parametrize("client", ["vega", "hermes", "generic", "remote"])
+@pytest.mark.parametrize("client", sorted(CLIENTS))
 def test_instructions_say_how_to_address_an_element(client):
     words = _words(instructions_for(Config(client=client)))
     assert {
@@ -70,6 +70,22 @@ def test_instructions_say_how_to_address_an_element(client):
         "total_chars",
         "next_offset",
     }.issubset(words)
+
+
+# Claude Code shows a server's instructions to the model only up to this many
+# characters (docs/CLAUDE_CODE_PLUGIN.md, measured on Claude Code 2.1.300). Past it
+# the tail is cut silently, and the tail is where a client learns how to look at
+# a capture and whom to hand a CAPTCHA to.
+CLAUDE_CODE_INSTRUCTIONS_CAP = 4096
+
+
+@pytest.mark.parametrize("client", sorted(CLIENTS))
+@pytest.mark.parametrize("headless", [True, False])
+def test_instructions_fit_the_claude_code_cap(client, headless):
+    text = instructions_for(Config(client=client, headless=headless))
+    assert len(text) <= CLAUDE_CODE_INSTRUCTIONS_CAP, (client, headless, len(text))
+    # The part that would be cut first is the part each client must not lose.
+    assert text.rstrip().endswith(("handle it.", "logged in)."))
 
 
 def test_healthz_answers_over_http_without_a_browser(tmp_path):

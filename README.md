@@ -740,6 +740,18 @@ An end user needs no pip and no `playwright install` when Chrome or Edge is inst
 the server drives that browser. If neither is found, the tools answer
 `browser_unavailable` so the client can prompt for an install.
 
+**Claude Code:** the repository is a Claude Code plugin and its own marketplace.
+One line installs it (Claude Code 2.1.275 or later):
+
+```bash
+claude plugin install lyra-browser --marketplace Intrect-io/lyra-browser
+```
+
+The plugin builds its own Python environment with `uv` (or `python3 -m venv`
+without it) on the first session, drives your Chrome or Edge, and asks for every
+site change and form send through Claude Code's own dialog. See
+[docs/CLAUDE_CODE_PLUGIN.md](docs/CLAUDE_CODE_PLUGIN.md).
+
 **Deploying it as a remote server (Cloudflare Containers):** see
 [docs/CLOUDFLARE.md](docs/CLOUDFLARE.md).
 
@@ -747,7 +759,7 @@ the server drives that browser. If neither is found, the tools answer
 
 | Var | Default | Meaning |
 |---|---|---|
-| `LYRA_BROWSER_CLIENT` | detected | `generic`, `hermes` or `remote` (also `--client`). Picks default paths, window mode and how captures reach the model — never permissions. `remote` is a server nobody sits at: headless, and `screenshot`/`read_image` attach the PNG as an MCP image. Detected from `HERMES_HOME` → hermes; otherwise `generic`. |
+| `LYRA_BROWSER_CLIENT` | detected | `generic`, `hermes`, `remote` or `claude-code` (also `--client`). Picks default paths, window mode and how captures reach the model — never permissions. `remote` is a server nobody sits at: headless, and `screenshot`/`read_image` attach the PNG as an MCP image. `claude-code` is the Claude Code plugin: a window where one can open, the same attached image, data beside `generic`'s. Detected from `HERMES_HOME` → hermes; otherwise `generic` (`claude-code` is never detected: the plugin passes the flag). |
 | `LYRA_BROWSER_DATA_DIR` | — | Base data dir (profile + audit). Overrides everything. |
 | `HERMES_HOME` | `~/.hermes` | hermes: data goes to `$HERMES_HOME/browser`. |
 | `LYRA_BROWSER_HEADLESS` | auto | Run without a visible window (see Headless mode). Unset: headless for hermes and remote, and on Linux with no `DISPLAY`/`WAYLAND_DISPLAY`; otherwise a window. |
@@ -904,9 +916,11 @@ example `python scripts/verify_browser_e2e.py --headless-only`, or headful under
 The server, session manager, tools, permission layer, enforcement, bot-check
 detection and audit are implemented, unit-tested (no browser needed) and exercised
 end-to-end against real sites with a real Chrome — ten rounds over eleven sites, 187
-judged navigations. Not yet driven by a live MCP client that implements elicitation;
-that is the next milestone, and it is what would let `consent_channel=elicit` replace
-the `confirm` flag.
+judged navigations. Driven by a live MCP client that implements elicitation since
+2026-10-15: as a Claude Code plugin (`docs/CLAUDE_CODE_PLUGIN.md`), a `claude -p`
+session's `Elicitation` hook approved a navigation and a cancelled form denied one,
+both audited as `consent_channel=elicit`/`denied` with no `confirm` fallback
+(Claude Code 2.1.300, `scripts/verify_claude_plugin_e2e.py`).
 
 ## License
 

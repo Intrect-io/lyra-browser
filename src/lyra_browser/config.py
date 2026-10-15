@@ -20,7 +20,7 @@ from .origin import Origin, parse_origin
 # Which agent harness is on the other end of the wire. It decides defaults
 # only — where data and captures go, whether a window is expected, and how
 # captures reach the model — never how permissions are judged.
-CLIENTS = frozenset({"vega", "hermes", "generic", "remote"})
+CLIENTS = frozenset({"vega", "hermes", "generic", "remote", "claude-code"})
 
 
 def _env(name: str, default: str | None = None) -> str | None:
@@ -48,7 +48,9 @@ def _detect_client() -> str:
     Order: LYRA_BROWSER_CLIENT > VEGA_DATA_DIR (vega) > HERMES_HOME (hermes) >
     generic. Hermes passes its stdio servers a whitelisted environment without
     HERMES_HOME, so a Hermes install usually says so explicitly (``--client
-    hermes``); detection is the convenience, not the contract.
+    hermes``); detection is the convenience, not the contract. ``claude-code``
+    is never detected: the Claude Code plugin passes ``--client claude-code``,
+    and a ``claude -p`` harness (the UAT brain) stays ``generic`` on purpose.
     """
     explicit = (_env("LYRA_BROWSER_CLIENT") or "").strip().lower()
     if explicit in CLIENTS:
@@ -79,7 +81,9 @@ def _default_data_dir(client: str = "generic") -> Path:
 
     One dir per client is deliberate: the profile holds real logins and
     Chromium locks it, so two harnesses sharing one would have the second
-    launch fail while the first is open.
+    launch fail while the first is open. ``claude-code`` shares ``generic``'s
+    dir on purpose: both are a person at this machine, and the profile lock
+    hands a second server an instance profile rather than failing it.
     """
     explicit = _env("LYRA_BROWSER_DATA_DIR")
     if explicit:
@@ -151,7 +155,8 @@ def _default_headless(client: str) -> bool:
     remote client reaches a server nobody sits in front of, so it is headless
     too. A Linux process with no display cannot open a window at all;
     launching headful there is a crash, headless is a working session that
-    reports ``attended=false``.
+    reports ``attended=false``. ``generic`` and ``claude-code`` are a person at
+    this machine, so they get a window wherever one can open.
     """
     return client in ("hermes", "remote") or not _has_display()
 

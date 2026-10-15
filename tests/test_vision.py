@@ -48,3 +48,17 @@ async def test_an_unreadable_capture_leaves_the_result_alone(tmp_path):
         result = await client.call_tool("screenshot", {})
     assert not any(isinstance(c, ImageContent) for c in result.content)
     assert result.structured_content["status"] == "ok"
+
+
+async def test_build_server_attaches_images_for_clients_that_render_them(tmp_path):
+    """remote and claude-code see MCP image blocks; the others get a path only."""
+    from lyra_browser.config import CLIENTS, Config
+    from lyra_browser.server import build_server
+
+    for client in sorted(CLIENTS):
+        cfg = Config(client=client, headless=True)
+        cfg.data_dir = tmp_path / client
+        cfg.__post_init__()
+        mcp = build_server(cfg)
+        has_vision = any(isinstance(m, VisionMiddleware) for m in mcp.middleware)
+        assert has_vision is (client in {"remote", "claude-code"}), client

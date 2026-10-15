@@ -1,0 +1,15 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "lyra-browser",
+  "description": "lyra: a persistent, logged-in browser Claude drives and you can watch and take over.",
+  "owner": { "name": "Intrect", "url": "https://github.com/Intrect-io" },
+  "plugins": [
+    {
+      "name": "lyra-browser",
+      "source": ".",
+      "description": "A persistent, logged-in Chromium that Claude drives and you can watch and take over. Every site change, form send, upload, download and publish asks you first.",
+      "category": "browser",
+      "tags": ["browser", "playwright", "mcp", "automation"]
+    }
+  ]
+}
