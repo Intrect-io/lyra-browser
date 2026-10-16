@@ -1,0 +1,43 @@
+{
+  "name": "@intrect/lyra-browser",
+  "version": "0.1.2",
+  "description": "npx launcher for lyra, an MCP server that gives an agent a persistent, logged-in Chromium you can watch and take over.",
+  "license": "MIT",
+  "author": "Intrect (https://github.com/Intrect-io)",
+  "homepage": "https://github.com/Intrect-io/lyra-browser#readme",
+  "bugs": {
+    "url": "https://github.com/Intrect-io/lyra-browser/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Intrect-io/lyra-browser.git",
+    "directory": "npm"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "browser",
+    "playwright",
+    "automation",
+    "co-browsing"
+  ],
+  "bin": {
+    "lyra-browser": "bin/lyra-browser.js"
+  },
+  "files": [
+    "bin/lyra-browser.js",
+    "constraints.txt",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "node --test",
+    "prepack": "node -e \"require('fs').copyFileSync('../LICENSE', 'LICENSE')\""
+  }
+}

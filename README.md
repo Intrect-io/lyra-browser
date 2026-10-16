@@ -6,8 +6,8 @@ time — co-browsing, not headless scraping.
 
 The same server runs **headless** when nobody sits at a window — for example under
 Hermes, where the user is reached through chat (see
-[docs/HERMES_INTEGRATION.md](docs/HERMES_INTEGRATION.md)), or as a remote server (see
-[docs/CLOUDFLARE.md](docs/CLOUDFLARE.md)).
+[docs/HERMES_INTEGRATION.md](https://github.com/Intrect-io/lyra-browser/blob/master/docs/HERMES_INTEGRATION.md)), or as a remote server (see
+[docs/CLOUDFLARE.md](https://github.com/Intrect-io/lyra-browser/blob/master/docs/CLOUDFLARE.md)).
 
 > **Names.** The project is **lyra**; the repository is `lyra-browser`. The command
 > (`lyra-browser`), the Python package (`lyra_browser`) and the environment variables
@@ -750,10 +750,25 @@ claude plugin install lyra-browser --marketplace Intrect-io/lyra-browser
 The plugin builds its own Python environment with `uv` (or `python3 -m venv`
 without it) on the first session, drives your Chrome or Edge, and asks for every
 site change and form send through Claude Code's own dialog. See
-[docs/CLAUDE_CODE_PLUGIN.md](docs/CLAUDE_CODE_PLUGIN.md).
+[docs/CLAUDE_CODE_PLUGIN.md](https://github.com/Intrect-io/lyra-browser/blob/master/docs/CLAUDE_CODE_PLUGIN.md).
+
+**Any MCP client, through npx:** the server is Python, and a small Node launcher
+(`npm/`) starts the matching PyPI release with `uv`, pinned to the dependency set in
+`uv.lock`:
+
+```bash
+claude mcp add lyra -- npx -y @intrect/lyra-browser     # or "command": "npx", "args": ["-y", "@intrect/lyra-browser"]
+npx -y @intrect/lyra-browser install-browser             # only if there is no Chrome or Edge
+```
+
+Needs Node 18+ and [uv](https://docs.astral.sh/uv/). Measured 2026-10-16 on Linux x86_64
+(Node 24.20.0, npm 11.19.0, uv 0.11.8): the first start with empty caches answers
+`initialize` in 3.6 to 8.7 s (8 runs), later starts in 1.4 to 3.4 s (29 runs); macOS and
+Windows are not measured. `python scripts/verify_npx_e2e.py` reproduces it. See
+[npm/README.md](https://github.com/Intrect-io/lyra-browser/blob/master/npm/README.md).
 
 **Deploying it as a remote server (Cloudflare Containers):** see
-[docs/CLOUDFLARE.md](docs/CLOUDFLARE.md).
+[docs/CLOUDFLARE.md](https://github.com/Intrect-io/lyra-browser/blob/master/docs/CLOUDFLARE.md).
 
 ## Configuration (env)
 
@@ -800,7 +815,7 @@ lyra-uat run examples/uat/demo/run.yaml      # one persona, Claude Code plays it
 lyra-uat batch examples/uat/demo/batch.yaml  # two personas in parallel, one process each
 ```
 
-A run leaves a directory: `report.json` (and `report.md`), `trace.jsonl`, `events.jsonl`, `captures/`, `network.jsonl`, `console.jsonl`, and the browser's own `audit.jsonl`. Persona, target, brain, hooks and limits are YAML or JSON; `lyra-uat schema run|batch|report` prints the JSON Schemas. A run that should act without anyone to ask sets `target.policy: autonomous`; the default is `closed`, which keeps the run on its trusted sites. Details, the report format and each brain's requirements are in [docs/UAT.md](docs/UAT.md).
+A run leaves a directory: `report.json` (and `report.md`), `trace.jsonl`, `events.jsonl`, `captures/`, `network.jsonl`, `console.jsonl`, and the browser's own `audit.jsonl`. Persona, target, brain, hooks and limits are YAML or JSON; `lyra-uat schema run|batch|report` prints the JSON Schemas. A run that should act without anyone to ask sets `target.policy: autonomous`; the default is `closed`, which keeps the run on its trusted sites. Details, the report format and each brain's requirements are in [docs/UAT.md](https://github.com/Intrect-io/lyra-browser/blob/master/docs/UAT.md).
 
 ## Headless mode
 

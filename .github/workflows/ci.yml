@@ -26,9 +26,33 @@ jobs:
           pip install -e ".[dev,uat]"
       - name: Lint
         run: ruff check .
+      # npm/constraints.txt is what the npx package pins; it must be uv.lock as exported
+      # now. uv is pinned to the version the file was generated with.
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.8"
+      - name: npx constraints match uv.lock
+        run: scripts/npm-constraints.sh | diff - npm/constraints.txt
       # Formatting is the pre-commit hook's job (ruff-format), so it is not repeated here.
       # What only a PR can do is test the merged tree. The unit suite runs on fakes: no
       # browser is launched, so no Playwright download. The real-browser gates stay manual
       # (scripts/verify_*_e2e.py).
       - name: Test
         run: pytest -q
+
+  # The npx launcher claims `node >=18`; its tests run against a fake uvx, so they need
+  # no Python, no network and no browser.
+  launcher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        node: [18, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Launcher tests
+        run: npm test
+        working-directory: npm

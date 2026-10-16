@@ -41,3 +41,8 @@ uat-runs/
 .env
 .env.*
 !.env.example
+
+# npx package (npm/): the LICENSE is copied in by `npm pack`, the tarball is a build product
+npm/node_modules/
+npm/LICENSE
+npm/*.tgz

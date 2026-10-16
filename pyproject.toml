@@ -5,12 +5,19 @@ build-backend = "hatchling.build"
 [project]
 name = "lyra-browser"
 version = "0.1.2"
-description = "Headful, collaborative browser MCP server for the VEGA agent harness — VEGA drives a visible Chromium window the user can watch and take over."
+description = "lyra: an MCP server that gives an agent a persistent, logged-in Chromium the user can watch and take over, with every site change, form send, upload and download asked first."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "unohee" }]
-keywords = ["mcp", "playwright", "browser-automation", "vega", "lyra", "co-browsing"]
+keywords = ["mcp", "playwright", "browser-automation", "lyra", "co-browsing"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
+]
 
 # fastmcp tracks the VEGA harness (3.2.0). playwright is held at 1.59, one minor
 # above the harness bundle (1.58.0): element refs (`aria_snapshot(mode="ai")`)
@@ -50,9 +57,18 @@ lyra-uat = "lyra_browser.uat.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/Intrect-io/lyra-browser"
+Repository = "https://github.com/Intrect-io/lyra-browser"
+Issues = "https://github.com/Intrect-io/lyra-browser/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lyra_browser"]
+
+# The sdist is what PyPI publishes, so it names what goes in rather than taking the whole
+# tree: untracked local files (plans, scratch dirs) are not gitignored and would ship.
+# tests/ stays out because several read files outside the package (the plugin manifest,
+# npm/), which an unpacked sdist does not have.
+[tool.hatch.build.targets.sdist]
+include = ["/src", "/README.md", "/LICENSE", "/pyproject.toml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
