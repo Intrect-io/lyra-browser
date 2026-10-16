@@ -1,9 +1,9 @@
 # lyra as a Claude Code plugin
 
 This repository is a [Claude Code plugin](https://code.claude.com/docs/en/plugins)
-and its own marketplace: the root holds `.claude-plugin/plugin.json`,
-`.claude-plugin/marketplace.json`, `.mcp.json`, `hooks/`, `skills/` and the
-launcher under `scripts/claude-plugin/`. Installing the plugin gives an
+and its own marketplace: the root holds `.claude-plugin/plugin.json`
+(manifest and MCP server), `.claude-plugin/marketplace.json`, `hooks/`, `skills/`
+and the launcher under `scripts/claude-plugin/`. Installing the plugin gives an
 interactive Claude Code session a persistent, logged-in Chromium it drives and
 you can watch, with every site change, form send, upload, download and publish
 asked through Claude Code's own dialog.
@@ -48,7 +48,7 @@ provide them. That is what this plugin does:
   `~/.claude/plugins/data/<plugin>-<marketplace>/`: `lyra-browser-lyra-browser`
   for a marketplace install, `lyra-browser-inline` under `--plugin-dir`
   (measured). It survives plugin updates and is removed on uninstall.
-- `.mcp.json` points the MCP server at `scripts/claude-plugin/launch.sh`,
+- The manifest's `mcpServers` points the server at `scripts/claude-plugin/launch.sh`,
   which runs the same bootstrap (a matching stamp returns at once) and then
   `exec`s `venv/bin/lyra-browser --client claude-code`. Neither script writes to
   stdout: the launcher's stdout is the MCP transport, and a `SessionStart`
@@ -79,7 +79,7 @@ system Chrome or Edge makes it unnecessary.
 
 Claude Code prompts for these when the plugin is enabled and lists them under
 `/config`. They reach the server as `LYRA_BROWSER_*` environment variables
-(`.mcp.json`), so for these six keys the plugin's value replaces anything set
+(the manifest's `mcpServers.lyra.env`), so for these six keys the plugin's value replaces anything set
 in your shell.
 
 | Option | Env var it sets | Meaning |
@@ -144,7 +144,7 @@ In `claude -p` with `--permission-prompts none`, an elicitation is cancelled,
 which the server reads as a denial: nothing outside the trusted sites can be
 navigated to, and nothing can be sent. That is the behaviour the UAT brain
 (`docs/UAT.md`) relies on, and it is why the UAT harness keeps the `generic`
-client rather than this one. The plugin's `.mcp.json` pins
+client rather than this one. The plugin manifest pins
 `LYRA_BROWSER_CONSENT_CHANNEL=elicit`, so a shell variable cannot loosen it. An
 unattended run that should approve its own declared actions belongs to
 `lyra-uat` with `target.policy: autonomous`, not to this plugin.
@@ -153,7 +153,7 @@ unattended run that should approve its own declared actions belongs to
 
 ```bash
 claude --plugin-dir /path/to/lyra-browser     # loads the working tree as lyra-browser@inline
-claude plugin validate /path/to/lyra-browser  # manifests, marketplace, .mcp.json
+claude plugin validate /path/to/lyra-browser  # manifest (with its MCP server), marketplace
 pytest tests/test_claude_plugin.py -q          # the same checks plus the launcher contract
 python scripts/verify_claude_plugin_e2e.py     # a real `claude -p` session through the plugin
 ```

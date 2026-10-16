@@ -3,11 +3,20 @@
   "displayName": "lyra browser",
   "version": "0.1.0",
   "description": "A persistent, logged-in Chromium that Claude drives and you can watch and take over. Navigation, form sending, uploads, downloads and publishing each ask you first through a dialog; a guard layer enforces the answer against every request, whatever caused it.",
-  "author": { "name": "Intrect", "url": "https://github.com/Intrect-io" },
+  "author": {
+    "name": "Intrect",
+    "url": "https://github.com/Intrect-io"
+  },
   "homepage": "https://github.com/Intrect-io/lyra-browser/blob/master/docs/CLAUDE_CODE_PLUGIN.md",
   "repository": "https://github.com/Intrect-io/lyra-browser",
   "license": "MIT",
-  "keywords": ["browser", "playwright", "mcp", "co-browsing", "automation"],
+  "keywords": [
+    "browser",
+    "playwright",
+    "mcp",
+    "co-browsing",
+    "automation"
+  ],
   "userConfig": {
     "trusted_origins": {
       "type": "string",
@@ -36,13 +45,31 @@
       "type": "string",
       "title": "Navigation guard backend",
       "description": "route judges the first request of a navigation through Playwright; cdp judges every redirect hop from a second DevTools connection over a loopback debugging port.",
-      "options": ["route", "cdp"],
+      "options": [
+        "route",
+        "cdp"
+      ],
       "default": "route"
     },
     "headless": {
       "type": "boolean",
       "title": "Headless",
       "description": "Run without a visible window. Leave unset for a window wherever one can open; with no window, highlight, ask-the-user and takeover answer unattended."
+    }
+  },
+  "mcpServers": {
+    "lyra": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/claude-plugin/launch.sh",
+      "env": {
+        "LYRA_BROWSER_CONSENT_CHANNEL": "elicit",
+        "LYRA_BROWSER_TRUSTED_ORIGINS": "${user_config.trusted_origins}",
+        "LYRA_BROWSER_TRUSTED_SEND_ORIGINS": "${user_config.trusted_send_origins}",
+        "LYRA_BROWSER_DENIED_ORIGINS": "${user_config.denied_origins}",
+        "LYRA_BROWSER_CONSENT_TIMEOUT": "${user_config.consent_timeout}",
+        "LYRA_BROWSER_GUARD": "${user_config.guard}",
+        "LYRA_BROWSER_HEADLESS": "${user_config.headless}"
+      },
+      "timeout": 900000
     }
   }
 }

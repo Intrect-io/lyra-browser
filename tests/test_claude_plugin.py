@@ -19,7 +19,6 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 MANIFEST = ROOT / ".claude-plugin" / "plugin.json"
 MARKETPLACE = ROOT / ".claude-plugin" / "marketplace.json"
-MCP = ROOT / ".mcp.json"
 HOOKS = ROOT / "hooks" / "hooks.json"
 SKILLS = ROOT / "skills"
 
@@ -44,8 +43,15 @@ def test_plugin_version_moves_with_the_package_version():
     assert _json(MANIFEST)["version"] == project["project"]["version"]
 
 
+def test_mcp_server_lives_in_the_manifest_not_a_root_mcp_json():
+    """A root .mcp.json is also read as the repo's project server, where
+    ${CLAUDE_PLUGIN_ROOT} is unset and the launch fails with ENOENT."""
+    assert not (ROOT / ".mcp.json").exists()
+    assert isinstance(_json(MANIFEST)["mcpServers"], dict)
+
+
 def test_mcp_server_runs_the_launcher_and_only_declared_options():
-    servers = _json(MCP)["mcpServers"]
+    servers = _json(MANIFEST)["mcpServers"]
     (name,) = servers
     assert name == "lyra", "tool names are mcp__plugin_lyra-browser_lyra__<tool>"
     server = servers[name]
