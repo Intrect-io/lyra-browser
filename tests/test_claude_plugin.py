@@ -65,7 +65,12 @@ def test_mcp_server_runs_the_launcher_and_only_declared_options():
         referenced.update(re.findall(r"\$\{user_config\.(\w+)\}", value))
     assert referenced <= declared, referenced - declared
     assert declared <= referenced, "an option nobody reads: " + str(declared - referenced)
-    assert server["env"]["LYRA_BROWSER_CONSENT_CHANNEL"] == "elicit"
+    assert server["env"]["LYRA_BROWSER_CONSENT_CHANNEL"] == "${user_config.approval}"
+    approval = _json(MANIFEST)["userConfig"]["approval"]
+    # Asking is the default; nothing weaker than autonomous is on offer (no
+    # legacy confirm=true, no off).
+    assert approval["default"] == "elicit"
+    assert approval["options"] == ["elicit", "autonomous"]
 
 
 def test_hook_file_wraps_the_event_map_and_quotes_the_plugin_root():

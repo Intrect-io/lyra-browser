@@ -79,11 +79,12 @@ system Chrome or Edge makes it unnecessary.
 
 Claude Code prompts for these when the plugin is enabled and lists them under
 `/config`. They reach the server as `LYRA_BROWSER_*` environment variables
-(the manifest's `mcpServers.lyra.env`), so for these six keys the plugin's value replaces anything set
+(the manifest's `mcpServers.lyra.env`), so for these seven keys the plugin's value replaces anything set
 in your shell.
 
 | Option | Env var it sets | Meaning |
 |---|---|---|
+| Approval | `LYRA_BROWSER_CONSENT_CHANNEL` | `elicit` (default) asks through a dialog. `autonomous` stops asking: navigation to any site and declared form sends, uploads and downloads are approved, audited as `consent_channel=autonomous`; publishing is still refused and denied sites still win. |
 | Trusted sites | `LYRA_BROWSER_TRUSTED_ORIGINS` | Not asked about for navigation. `https://host`, bare `host`, or `*.example.com`, comma-separated. Never covers sending, uploading, downloading or publishing. |
 | Send-trusted sites | `LYRA_BROWSER_TRUSTED_SEND_ORIGINS` | Sending a form and uploading also pre-approved, for acceptance runs against your own product. A separate list. |
 | Denied sites | `LYRA_BROWSER_DENIED_ORIGINS` | Refused whatever else says yes. |
@@ -91,8 +92,9 @@ in your shell.
 | Navigation guard backend | `LYRA_BROWSER_GUARD` | `route` or `cdp`; see the README's Guard backends. |
 | Headless | `LYRA_BROWSER_HEADLESS` | Unset: a window wherever one can open, and headless (`attended=false`) on Linux with no `DISPLAY`/`WAYLAND_DISPLAY`. Set to off, it asks for a window even there, and Chrome fails to launch without a reachable X server. |
 
-The consent channel is pinned to `elicit`: the server asks through MCP
-elicitation and never falls back to the model's own `confirm=true`. Every
+The consent channel is one of the two values above. With `elicit` the server
+asks through MCP elicitation and never falls back to the model's own
+`confirm=true`; neither `legacy` nor `off` can be chosen here. Every
 other `LYRA_BROWSER_*` variable from the README works through your shell
 environment, which the server inherits.
 
@@ -144,10 +146,10 @@ In `claude -p` with `--permission-prompts none`, an elicitation is cancelled,
 which the server reads as a denial: nothing outside the trusted sites can be
 navigated to, and nothing can be sent. That is the behaviour the UAT brain
 (`docs/UAT.md`) relies on, and it is why the UAT harness keeps the `generic`
-client rather than this one. The plugin manifest pins
-`LYRA_BROWSER_CONSENT_CHANNEL=elicit`, so a shell variable cannot loosen it. An
-unattended run that should approve its own declared actions belongs to
-`lyra-uat` with `target.policy: autonomous`, not to this plugin.
+client rather than this one. The plugin manifest sets
+`LYRA_BROWSER_CONSENT_CHANNEL` from the Approval option, so a shell variable
+cannot loosen it; with Approval set to `autonomous` the same run approves its
+own declared actions instead.
 
 ## Develop and test
 

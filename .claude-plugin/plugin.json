@@ -1,7 +1,7 @@
 {
   "name": "lyra-browser",
   "displayName": "lyra browser",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A persistent, logged-in Chromium that Claude drives and you can watch and take over. Navigation, form sending, uploads, downloads and publishing each ask you first through a dialog; a guard layer enforces the answer against every request, whatever caused it.",
   "author": {
     "name": "Intrect",
@@ -18,6 +18,16 @@
     "automation"
   ],
   "userConfig": {
+    "approval": {
+      "type": "string",
+      "title": "Approval",
+      "description": "elicit asks you through a dialog before navigating to a site, sending a form, uploading, downloading or publishing. autonomous approves navigation to any site and declared form sends, uploads and downloads without asking; publishing is still refused, denied sites still win, and every approval is audited as consent_channel=autonomous.",
+      "options": [
+        "elicit",
+        "autonomous"
+      ],
+      "default": "elicit"
+    },
     "trusted_origins": {
       "type": "string",
       "title": "Trusted sites",
@@ -61,7 +71,7 @@
     "lyra": {
       "command": "${CLAUDE_PLUGIN_ROOT}/scripts/claude-plugin/launch.sh",
       "env": {
-        "LYRA_BROWSER_CONSENT_CHANNEL": "elicit",
+        "LYRA_BROWSER_CONSENT_CHANNEL": "${user_config.approval}",
         "LYRA_BROWSER_TRUSTED_ORIGINS": "${user_config.trusted_origins}",
         "LYRA_BROWSER_TRUSTED_SEND_ORIGINS": "${user_config.trusted_send_origins}",
         "LYRA_BROWSER_DENIED_ORIGINS": "${user_config.denied_origins}",
