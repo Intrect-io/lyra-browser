@@ -75,10 +75,21 @@ def _client_can_be_asked(ctx: object) -> bool:
 _APPROVE = "approve"
 _DENY = "deny"
 # The single-select form FastMCP builds for ``[_APPROVE, _DENY]``, spelled out
-# because the answer is read raw (see ``_verdict``).
+# because the answer is read raw (see ``_verdict``). The default makes the
+# client's Accept button the yes: Claude Code renders the field unset and
+# refuses Accept with "This field is required" until it is picked, so a user
+# who pressed Accept was stuck and their Esc read as a cancel. Decline, Esc and
+# an explicit ``deny`` still refuse.
 _APPROVAL_SCHEMA = {
     "type": "object",
-    "properties": {"value": {"type": "string", "title": "Decision", "enum": [_APPROVE, _DENY]}},
+    "properties": {
+        "value": {
+            "type": "string",
+            "title": "Decision",
+            "enum": [_APPROVE, _DENY],
+            "default": _APPROVE,
+        }
+    },
     "required": ["value"],
 }
 

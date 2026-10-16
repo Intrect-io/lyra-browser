@@ -219,6 +219,27 @@ async def test_elicit_accept_without_a_value_allows(make_broker, monkeypatch):
     assert ctx.session.schemas[0]["properties"]["value"]["enum"] == ["approve", "deny"]
 
 
+async def test_form_defaults_to_approve_so_accept_alone_is_the_yes(make_broker, monkeypatch):
+    """Claude Code renders the Decision field unset and blocks Accept with
+    "This field is required" until it is picked. With the default, Accept is
+    the yes; the shape a VEGA-style host matches on (type, enum, required) is
+    unchanged."""
+    broker, _, _ = make_broker("elicit")
+    ctx = FakeContext(FakeElicitResult("decline"))
+    monkeypatch.setattr("fastmcp.server.dependencies.get_context", lambda: ctx)
+
+    decision = await broker.request(action="navigate", origin=SITE, capability=Capability.NAVIGATE)
+
+    assert not decision.allowed
+    schema = ctx.session.schemas[0]
+    assert schema["required"] == ["value"]
+    assert set(schema["properties"]) == {"value"}
+    field = schema["properties"]["value"]
+    assert field["type"] == "string"
+    assert field["enum"] == ["approve", "deny"]
+    assert field["default"] == "approve"
+
+
 @pytest.mark.parametrize(
     "content",
     [{"value": None}, {"value": "yes"}, {"approved": True}, "approve", ["approve"]],

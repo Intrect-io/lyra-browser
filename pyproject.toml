@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lyra-browser"
-version = "0.1.0"
+version = "0.1.1"
 description = "Headful, collaborative browser MCP server for the VEGA agent harness — VEGA drives a visible Chromium window the user can watch and take over."
 readme = "README.md"
 requires-python = ">=3.11"

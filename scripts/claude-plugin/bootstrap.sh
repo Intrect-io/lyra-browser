@@ -80,8 +80,10 @@ UV="$(command -v uv || true)"
 
 if [[ -n "$UV" && -f "$ROOT/uv.lock" ]]; then
   log "using uv ($("$UV" --version 2>/dev/null))"
+  # --reinstall-package: uv caches the built project wheel by name and version,
+  # so a changed tree at the same version would otherwise reinstall stale code.
   if ! UV_PROJECT_ENVIRONMENT="$VENV" "$UV" sync --frozen --no-dev --no-editable \
-      --project "$ROOT" >>"$LOG" 2>&1; then
+      --reinstall-package lyra-browser --project "$ROOT" >>"$LOG" 2>&1; then
     log "uv sync failed; last lines of $LOG:"
     tail -n 20 "$LOG" >&2
     exit 1
