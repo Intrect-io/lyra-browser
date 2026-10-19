@@ -13,7 +13,8 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    # Runs take about 2.5 minutes; a hang should not hold a runner for six hours.
+    # Runs take about two minutes (91 to 121 s over three runs on 2026-10-19, down from 162 s;
+    # Test is most of it); a hang should not hold a runner for six hours.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
