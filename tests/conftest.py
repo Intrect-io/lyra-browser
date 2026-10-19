@@ -470,10 +470,14 @@ class FakePage:
             return self.after_send
         return True
 
-    def wait_for_timeout(self, ms: int) -> Any:
-        """The fake never really waits; the call is recorded for assertions."""
+    async def wait_for_timeout(self, ms: int) -> None:
+        """The fake never really waits; the call is recorded for assertions.
+
+        A coroutine function, as Playwright's is. As a plain ``def`` it returned None,
+        the tool's ``await`` raised, and ``_await_settle`` fell back to a real
+        three-second sleep in every test that sends a form.
+        """
         self.calls.append(("wait_for_timeout", ms))
-        return None
 
     def on(self, event: str, handler) -> None:
         """Record a listener being added. Nothing is delivered through it."""

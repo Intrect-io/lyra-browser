@@ -40,6 +40,20 @@ def _read_form_scope(page) -> dict:
     raise AssertionError("read_form never called page.evaluate with an argument")
 
 
+@pytest.fixture(autouse=True)
+def _short_appear_budget(monkeypatch):
+    """A control that is absent stays absent, so do not spend the production wait on it.
+
+    ``_appears`` gives a locator three seconds to show up, per candidate selector (five
+    for ``set_editor``), and most "not found" tests answer for a page that never builds
+    it. Zero is wrong: test_upload_file_waits_for_a_picker_the_page_builds_late exists
+    to prove the wait happens, and it fails at zero. A few milliseconds keeps it.
+    """
+    from lyra_browser.tools import actionable
+
+    monkeypatch.setattr(actionable, "_APPEAR_BUDGET_S", 0.05)
+
+
 # --------------------------------------------------------------------------
 # read_form: the names, types and options read_page loses
 # --------------------------------------------------------------------------
@@ -857,3 +871,47 @@ async def test_an_unusable_control_does_not_prompt_for_a_one_shot_grant(make_ctx
     result = await (await tools_of(ctx))["publish"](selector="#live", submit="#send")
 
     assert result["status"] == "hidden"
+
+
+async def test_settle_reads_the_page_even_when_waiting_on_it_fails(monkeypatch):
+    """A page mid-navigation refuses ``wait_for_timeout``. The fallback sleeps instead,
+    and the result is still read back: without it a navigation would be an exception.
+
+    Nothing else asserts this. The fake's ``wait_for_timeout`` used to fail by accident,
+    which kept the fallback running in every test, three real seconds at a time.
+    """
+    from lyra_browser.tools import forms
+
+    monkeypatch.setattr(forms, "_SETTLE_BUDGET_S", 0.0)
+
+    class MidNavigation:
+        def __init__(self) -> None:
+            self.evaluated = 0
+
+        async def wait_for_timeout(self, ms: int) -> None:
+            raise RuntimeError(
+                "Execution context was destroyed, most likely because of a navigation"
+            )
+
+        async def evaluate(self, expression: str) -> dict:
+            self.evaluated += 1
+            return {"formPresent": False, "errors": [], "alert": ""}
+
+    page = MidNavigation()
+    after = await forms._await_settle(page)
+
+    assert page.evaluated == 1
+    assert after["formPresent"] is False
+
+
+def test_the_fake_page_waits_the_way_playwrights_does():
+    """The fake must stay awaitable. As a plain ``def`` it made the tool's own ``await``
+    raise and sent every form test through a real three-second sleep."""
+    import inspect
+
+    from playwright.async_api import Page
+
+    from conftest import FakePage
+
+    assert inspect.iscoroutinefunction(Page.wait_for_timeout)
+    assert inspect.iscoroutinefunction(FakePage.wait_for_timeout)
