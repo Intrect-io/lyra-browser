@@ -4,13 +4,17 @@ name: Release
 # lyra-browser==<its own version> from PyPI, then npm. Both authenticate with
 # short-lived OIDC credentials; no token is stored in the repository.
 #
-# One-time setup, by a person:
-#   PyPI  pypi.org -> Publishing -> add a pending publisher for project `lyra-browser`:
-#         owner Intrect-io, repository lyra-browser, workflow release.yml, environment pypi.
-#   npm   the first version of @intrect/lyra-browser is published by hand. Then, on
-#         npmjs.com -> the package -> Settings -> Trusted Publisher: Intrect-io/lyra-browser,
-#         workflow release.yml, environment npm. Then set the repository variable
+# 0.1.2, the first version of both packages, was uploaded by hand with account tokens,
+# because a package has to exist before a trusted publisher can be attached to it
+# (npm: unconfirmed whether it can be set earlier). Setup for the first tagged release,
+# by a person, with the same values for both registries (workflow release.yml):
+#   PyPI  pypi.org -> project lyra-browser -> Publishing -> add a trusted publisher:
+#         owner Intrect-io, repository lyra-browser, environment pypi.
+#   npm   npmjs.com -> @intrect/lyra-browser -> Settings -> Trusted Publisher:
+#         Intrect-io/lyra-browser, environment npm. Then set the repository variable
 #         NPM_OIDC to true, which turns the npm and smoke jobs on.
+# Then revoke the account tokens that uploaded 0.1.2. Until the PyPI publisher exists,
+# the pypi job below fails on a tag push.
 
 on:
   push:
@@ -138,17 +142,22 @@ jobs:
               process.exit(1);
             }
           ' "$(npm --version)"
-      - name: The release is on PyPI, where the launcher installs it from
+      # The simple index is what uv reads, with the same Accept header. The JSON API
+      # (/pypi/<name>/<version>/json) answered 200 minutes before uv could resolve the
+      # release on 0.1.2 (measured 2026-10-19), so it is not evidence the launcher works.
+      - name: The release resolves from PyPI's simple index, where the launcher installs it from
         env:
           VERSION: ${{ needs.gate.outputs.version }}
         run: |
+          pattern="lyra_browser-${VERSION//./\.}(-|\.tar\.gz)"
+          accept="application/vnd.pypi.simple.v1+json, application/vnd.pypi.simple.v1+html;q=0.2, text/html;q=0.01"
           for attempt in $(seq 1 30); do
-            if curl -fsS "https://pypi.org/pypi/lyra-browser/${VERSION}/json" > /dev/null; then
+            if curl -fsS -H "Accept: ${accept}" "https://pypi.org/simple/lyra-browser/" | grep -Eq "${pattern}"; then
               exit 0
             fi
             sleep 10
           done
-          echo "lyra-browser ${VERSION} is not on PyPI" >&2
+          echo "lyra-browser ${VERSION} is not in PyPI's simple index" >&2
           exit 1
       - name: Publish
         run: npm publish --provenance --access public
