@@ -138,8 +138,10 @@ class Keyboard:
             "modifiers": self.modifiers,
             "key": kd.key,
             "code": kd.code,
+            # windowsVirtualKeyCode only. A nativeVirtualKeyCode is read in the platform's
+            # own key codes: on macOS 27 is not Escape, and Chrome took it for a browser
+            # shortcut that opened chrome://help (measured). Playwright sends none either.
             "windowsVirtualKeyCode": kd.key_code,
-            "nativeVirtualKeyCode": kd.key_code,
             "location": kd.location,
             "autoRepeat": False,
             "isKeypad": False,

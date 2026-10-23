@@ -30,8 +30,12 @@ _IFRAME_ATTACH = {
     "autoAttach": True,
     "waitForDebuggerOnStart": False,
     "flatten": True,
-    "filter": [{"type": "iframe"}, {"exclude": True}],
+    "filter": [{"type": "iframe"}, {"type": "worker"}, {"exclude": True}],
 }
+# Dedicated workers are attached only to be let go: like a popup, one can arrive paused
+# though nobody asked for that, and it then never runs (measured: a page's dedicated
+# worker never started under the native driver until released).
+_RELEASE_ONLY = frozenset({"worker"})
 SETUP_TIMEOUT_S = 10.0
 
 
@@ -79,6 +83,13 @@ class FrameTracker:
     def _on_attached(self, params: dict, parent: str | None) -> None:
         info = params.get("targetInfo") or {}
         child = params.get("sessionId")
+        if info.get("type") in _RELEASE_ONLY and child:
+            conn = self._page._context._conn
+            task = asyncio.ensure_future(
+                conn.send("Runtime.runIfWaitingForDebugger", session=child)
+            )
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())
+            return
         if info.get("type") != "iframe" or not child or parent is None:
             return
         frame_id = info.get("targetId", "")
@@ -100,6 +111,7 @@ class FrameTracker:
             if frame.get("id"):
                 self._session_of.setdefault(frame["id"], session)
                 page._worlds.forget(frame["id"])
+                page._frame_urls[frame["id"]] = frame.get("url", "") + frame.get("urlFragment", "")
 
         def attached(params: dict, _s: str | None) -> None:
             if params.get("frameId"):
