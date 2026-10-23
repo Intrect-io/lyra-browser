@@ -405,15 +405,25 @@ class CdpGuard:
 
     # -- lifecycle ----------------------------------------------------------------
 
-    async def start(self, profile_dir: Path, *, timeout: float = SETUP_TIMEOUT_S) -> None:
+    async def start(
+        self,
+        profile_dir: Path,
+        *,
+        endpoint: tuple[int, str] | None = None,
+        timeout: float = SETUP_TIMEOUT_S,
+    ) -> None:
         """Connect, guard every existing tab, and return only when new ones will be too.
+
+        ``endpoint`` is the ``(port, path)`` a launcher already read from the profile's
+        ``DevToolsActivePort`` (the native driver does, and the file is deleted on read);
+        without it the file is read here.
 
         Raises ``CdpGuardError``. The browser is left as it is: it is the caller's to
         close, because an unguarded window must not stay open.
         """
         self._starting = True
         try:
-            port, path = await read_endpoint(profile_dir, timeout)
+            port, path = endpoint or await read_endpoint(profile_dir, timeout)
             try:
                 self._ws = await WebSocket.connect(_LOOPBACK, port, path, timeout=CONNECT_TIMEOUT_S)
                 self._ws.shrink = shrink_oversize
