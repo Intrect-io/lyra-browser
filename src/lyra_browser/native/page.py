@@ -35,6 +35,8 @@ from .evaluate import (
     is_function,
     is_stale_context,
 )
+from .input import Keyboard, Mouse
+from .locator import FrameLocator, Locator
 
 if TYPE_CHECKING:
     from .context import NativeContext
@@ -76,16 +78,6 @@ class _Outcome:
             self.future.set_result((kind, value))
 
 
-class _Unimplemented:
-    """``keyboard``/``mouse`` until the input phase lands: every call says so."""
-
-    def __init__(self, name: str) -> None:
-        self._name = name
-
-    def __getattr__(self, item: str):
-        raise Error(f"{self._name}.{item} is not implemented by the native driver yet")
-
-
 class NativePage:
     def __init__(
         self, context: NativeContext, target_id: str, session: str, opener_id: str | None, url: str
@@ -109,8 +101,8 @@ class NativePage:
         self._waiters: list[Callable[[], None]] = []
         self._outcome: _Outcome | None = None
         self._failed_loads: dict[str, str] = {}
-        self.keyboard = _Unimplemented("Keyboard")
-        self.mouse = _Unimplemented("Mouse")
+        self.keyboard = Keyboard(self)
+        self.mouse = Mouse(self, self.keyboard)
 
     # -- plumbing -------------------------------------------------------------------
 
@@ -527,6 +519,29 @@ class NativePage:
 
     async def title(self) -> str:
         return str(await self.evaluate("document.title") or "")
+
+    # -- elements ---------------------------------------------------------------------
+
+    def locator(self, selector: str) -> Locator:
+        return Locator(self, selector)
+
+    def frame_locator(self, selector: str) -> FrameLocator:
+        return FrameLocator(self, (selector,))
+
+    async def _resolve_ref(self, ref: str, frame_id: str, context_id: int, group: str) -> list[str]:
+        """The element an ``aria-ref`` names (filled in by the snapshot phase)."""
+        return []
+
+    def _release_group(self, group: str) -> None:
+        """Drop the remote objects one locator attempt created; nobody waits for it."""
+        if self._closed:
+            return
+        task = asyncio.ensure_future(
+            self._context._conn.send(
+                "Runtime.releaseObjectGroup", {"objectGroup": group}, session=self._session
+            )
+        )
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())
 
     # -- capture ----------------------------------------------------------------------
 
