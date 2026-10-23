@@ -14,6 +14,7 @@ from starlette.responses import PlainTextResponse, Response
 
 from .approval import CollaborationState
 from .audit import AuditLog
+from .bypass import BypassMiddleware
 from .config import Config
 from .context import ServerContext
 from .session import BrowserSession
@@ -159,6 +160,9 @@ def build_server(config: Config | None = None) -> FastMCP:
         # Both clients render an MCP image block; a path alone would leave the
         # model reading a file it cannot (remote) or need not (Claude Code) open.
         mcp.add_middleware(VisionMiddleware())
+    if cfg.client == "claude-code":
+        # Only this client runs the plugin hook that sets the field (see bypass.py).
+        mcp.add_middleware(BypassMiddleware(enabled=cfg.follow_bypass))
 
     # Liveness for a platform that has to know the server is up before it
     # routes to it (a container's ping). Serves HTTP only; stdio ignores it.

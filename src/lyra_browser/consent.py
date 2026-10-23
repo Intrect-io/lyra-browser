@@ -23,6 +23,12 @@ task on the open web needs (every site, and a declared SUBMIT / UPLOAD / DOWNLOA
 recorded as ``consent_channel=autonomous``, and still refuses PUBLISH, opaque origins and
 ``denied_origins``.
 
+A fifth is ``bypass``: Claude Code running in bypassPermissions mode, where the person
+has told the client not to ask before acting. It reaches this module from the plugin's
+PreToolUse hook, not from the model (see ``bypass``), and approves every scope,
+PUBLISH included, recorded as ``consent_channel=bypass``. ``denied_origins`` and a
+takeover still win, and an opaque origin is still asked about.
+
 Everything that is not an explicit approval is a denial: no live request context,
 an unsupported client, a timeout, a decline, a cancel, a transport error.
 """
@@ -35,6 +41,7 @@ import anyio
 
 from .approval import CollaborationState
 from .audit import AuditLog
+from .bypass import bypass_active
 from .config import Config, TrustedOrigins, parse_trusted_origins
 from .origin import Origin, loggable_url
 from .permission import Capability, Grant, PermissionStore
@@ -123,7 +130,8 @@ class Decision:
     channel: str
     """How it was decided: ``grant`` (already covered), ``trusted`` (the operator's
     list), ``trusted_send`` (the operator's send list), ``elicit``, ``legacy``,
-    ``off``, or ``denied``."""
+    ``autonomous``, ``bypass`` (Claude Code's bypassPermissions mode), ``off``, or
+    ``denied``."""
     detail: str = ""
     granted: Grant | None = None
     """The grant this decision rests on, so a finished action can hand it back."""
@@ -294,6 +302,9 @@ class ConsentBroker:
         channel = self._config.consent_channel
         if channel == "off":
             return Decision(True, "off")
+        bypass = self._ask_bypass(origin)
+        if bypass is not None:
+            return bypass
         if channel == "autonomous":
             return self._ask_autonomous(origin, capability)
         if channel in ("elicit", "auto"):
@@ -310,6 +321,22 @@ class ConsentBroker:
             # overridden by the model asserting confirm=true.
             return self._ask_legacy(legacy_confirm, fallback_from=decision.detail)
         return self._ask_legacy(legacy_confirm)
+
+    def _ask_bypass(self, origin: Origin) -> Decision | None:
+        """Claude Code's bypassPermissions answer, or None when it does not apply.
+
+        Not during a takeover: the consent asked for then is the release of the
+        takeover, and only the person holding the window answers who drives. Not for
+        an opaque origin either: ``file:`` names a file on this machine, not a site,
+        and that one is still asked about.
+        """
+        if not (self._config.follow_bypass and bypass_active()):
+            return None
+        if self._collab is not None and self._collab.takeover:
+            return None
+        if origin.is_opaque:
+            return None
+        return Decision(True, "bypass", "approved: Claude Code is in bypassPermissions mode")
 
     @staticmethod
     def _ask_autonomous(origin: Origin, capability: Capability) -> Decision:

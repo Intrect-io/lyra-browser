@@ -428,6 +428,12 @@ class Config:
     #              (single-use, audited as ``autonomous``). PUBLISH, opaque origins
     #              (file:, data:, javascript:) and ``denied_origins`` are still refused.
     consent_channel: str = "auto"
+    # Claude Code client only: when Claude Code runs in bypassPermissions mode, answer
+    # consent requests without asking (audited as ``bypass``). The mode reaches the
+    # server through the plugin's PreToolUse hook, never from a tool argument the
+    # model sets (see bypass.py). ``denied_origins``, opaque origins and a takeover
+    # still win.
+    follow_bypass: bool = True
     # How long an unanswered prompt holds its tool call before it becomes a
     # denial. Five minutes suits a person at a screen; a gateway nobody is
     # watching wants it short (docs/HERMES_INTEGRATION.md).
@@ -551,6 +557,9 @@ class Config:
                 _env("LYRA_BROWSER_CONSENT_CHANNEL")
                 or cls.__dataclass_fields__["consent_channel"].default
             ),
+            # Blank counts as unset: a plugin install that predates the option
+            # substitutes an empty string, and that must not read as "off".
+            follow_bypass=_as_optional_bool(_env("LYRA_BROWSER_FOLLOW_BYPASS")) is not False,
             consent_timeout_s=_as_float(_env("LYRA_BROWSER_CONSENT_TIMEOUT"), default=300.0),
             trusted_origins=parse_trusted_origins(_env("LYRA_BROWSER_TRUSTED_ORIGINS")).entries,
             trusted_send_origins=parse_trusted_origins(
