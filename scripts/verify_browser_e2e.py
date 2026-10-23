@@ -104,6 +104,9 @@ async def build_tools(data_dir: Path, *, headless: bool, **overrides):
         if "LYRA_BROWSER_GUARD" in os.environ
         else {}
     )
+    # LYRA_BROWSER_DRIVER=native runs it on lyra's own driver (no Playwright), the same way.
+    if "LYRA_BROWSER_DRIVER" in os.environ:
+        backend["driver"] = os.environ["LYRA_BROWSER_DRIVER"]
     cfg = Config(data_dir=data_dir, headless=headless, **backend, **overrides)
     # The gate promises to leave the user's data alone; with VEGA_DATA_DIR set
     # the capture dir would otherwise resolve into the real uploads root.
