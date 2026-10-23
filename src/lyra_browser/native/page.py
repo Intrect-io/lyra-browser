@@ -35,6 +35,15 @@ from .evaluate import (
     is_function,
     is_stale_context,
 )
+from .events import (
+    OBSERVER_EVENTS,
+    RUNTIME_EVENTS,
+    ConsoleMessage,
+    ObservedResponse,
+    PageError,
+    Request,
+    url_matcher,
+)
 from .frames import FrameRef, FrameTracker
 from .input import Keyboard, Mouse
 from .locator import FrameLocator, Locator
@@ -102,6 +111,8 @@ class NativePage:
         self._waiters: list[Callable[[], None]] = []
         self._outcome: _Outcome | None = None
         self._failed_loads: dict[str, str] = {}
+        self._requests: dict[str, Request] = {}
+        self._runtime_on = False
         self.keyboard = Keyboard(self)
         self.mouse = Mouse(self, self.keyboard)
         self._frame_map = FrameTracker(self)
@@ -170,6 +181,7 @@ class NativePage:
         self._on("Page.lifecycleEvent", self._on_lifecycle)
         self._on("Page.frameStoppedLoading", self._on_stopped_loading)
         self._on("Page.javascriptDialogOpening", self._on_dialog)
+        self._on("Network.requestWillBeSent", self._on_request)
         self._on("Network.responseReceived", self._on_response)
         self._on("Network.loadingFailed", self._on_loading_failed)
         commands = [
@@ -257,7 +269,22 @@ class NativePage:
         if params.get("frameId") == self.target_id and self._outcome is not None:
             self._outcome.settle("stopped")
 
+    def _on_request(self, params: dict) -> None:
+        if not self._observed():
+            return
+        request = Request(params)
+        self._requests[params.get("requestId", "")] = request
+        while len(self._requests) > 512:
+            self._requests.pop(next(iter(self._requests)))
+        self._emit("request", request)
+
+    def _observed(self) -> bool:
+        return any(self._handlers.get(event) for event in OBSERVER_EVENTS)
+
     def _on_response(self, params: dict) -> None:
+        if self._observed():
+            request = self._requests.get(params.get("requestId", ""))
+            self._emit("response", ObservedResponse(params, request))
         if params.get("type") == "Document" and params.get("frameId") == self.target_id:
             loader = params.get("loaderId") or params.get("requestId", "")
             self._responses[loader] = Response(params)
@@ -266,6 +293,11 @@ class NativePage:
                 self._responses.pop(next(iter(self._responses)))
 
     def _on_loading_failed(self, params: dict) -> None:
+        if self._observed():
+            request = self._requests.pop(params.get("requestId", ""), None)
+            if request is not None:
+                request.failure = params.get("errorText", "") or "failed"
+                self._emit("requestfailed", request)
         if params.get("type") == "Document":
             self._failed_loads[params.get("requestId", "")] = params.get("errorText", "")
             while len(self._failed_loads) > 16:
@@ -288,6 +320,17 @@ class NativePage:
 
     def on(self, event: str, handler: Callable) -> None:
         self._handlers.setdefault(event, []).append(handler)
+        if event in RUNTIME_EVENTS and not self._runtime_on:
+            self._enable_runtime()
+
+    def _enable_runtime(self) -> None:
+        """Console and page errors need Runtime.enable: only for a page someone observes."""
+        self._runtime_on = True
+        self._on("Runtime.consoleAPICalled", lambda p: self._emit("console", ConsoleMessage(p)))
+        self._on("Runtime.exceptionThrown", lambda p: self._emit("pageerror", PageError(p)))
+        if not self._closed:
+            task = asyncio.ensure_future(self._send("Runtime.enable"))
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())
 
     def remove_listener(self, event: str, handler: Callable) -> None:
         with contextlib.suppress(KeyError, ValueError):
@@ -457,6 +500,71 @@ class NativePage:
         return await self._history(
             "Page.reload", lambda: self._send("Page.reload"), wait_until, timeout
         )
+
+    def _loaded(self, name: str) -> bool:
+        """Whether the current document reached lifecycle ``name``.
+
+        A document that committed before this page was set up (the first about:blank)
+        reported its lifecycle to nobody; it is taken as loaded, as Playwright takes it.
+        """
+        loader = self._loader
+        if loader is None or loader not in self._lifecycle:
+            return True
+        return name in self._lifecycle[loader]
+
+    async def wait_for_load_state(
+        self, state: str = "load", *, timeout: float | None = None
+    ) -> None:
+        api = "Page.wait_for_load_state"
+        name = _LIFECYCLE.get(state)
+        if name is None:
+            raise Error(f"{api}: state: expected one of (load|domcontentloaded|networkidle)")
+        deadline = self._deadline(timeout)
+        await self._wait(lambda: self._loaded(name), deadline, api, [f'waiting for "{state}"'])
+
+    async def wait_for_url(
+        self, url: Any, *, timeout: float | None = None, wait_until: str = "load"
+    ) -> None:
+        api = "Page.wait_for_url"
+        matches = url_matcher(url)
+        deadline = self._deadline(timeout)
+        log = [f'waiting for navigation to "{url}" until "{wait_until}"']
+        await self._wait(lambda: matches(self._url), deadline, api, log)
+        name = _LIFECYCLE.get(wait_until)
+        if name is not None:
+            await self._wait(lambda: self._loaded(name), deadline, api, log)
+
+    async def wait_for_function(
+        self,
+        expression: str,
+        *,
+        arg: Any = NO_ARG,
+        timeout: float | None = None,
+        polling: Any = "raf",
+    ) -> Any:
+        """Poll ``expression`` until it returns something truthy; that value.
+
+        ``polling`` in milliseconds (``"raf"`` polls about every frame). A navigation in
+        the middle is not an error: the next poll runs in the new document.
+        """
+        api = "Page.wait_for_function"
+        deadline = self._deadline(timeout)
+        interval = 0.016 if polling == "raf" else max(0.001, float(polling) / 1000)
+        loop = asyncio.get_running_loop()
+        while True:
+            try:
+                value = await self._run(api, expression, arg, None, self.target_id)
+            except Error as exc:
+                if CONTEXT_DESTROYED not in str(exc):
+                    raise
+                value = None
+            if value:
+                return value
+            if self._closed:
+                raise TargetClosedError()
+            if loop.time() >= deadline:
+                raise timeout_error(api, self._timeout_ms, ["waiting for function"])
+            await asyncio.sleep(min(interval, max(0.0, deadline - loop.time())))
 
     async def wait_for_timeout(self, timeout: float) -> None:
         await asyncio.sleep(max(0.0, timeout) / 1000)
