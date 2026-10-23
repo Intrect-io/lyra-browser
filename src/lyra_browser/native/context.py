@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -64,7 +65,11 @@ class NativeContext:
         self._handlers: dict[str, list[Callable]] = {}
         self._downloads: dict[str, Download] = {}
         self._download_log: list[tuple[str, str]] = []  # (page target id, guid), in order
-        self._download_dir = Path(tempfile.mkdtemp(prefix="lyra-native-downloads-"))
+        # TMPDIR as it is now, not as tempfile cached it at first use: a caller that
+        # points TMPDIR at a private dir (the downloads gate does) gets the files there.
+        self._download_dir = Path(
+            tempfile.mkdtemp(prefix="lyra-native-downloads-", dir=os.environ.get("TMPDIR") or None)
+        )
         self._started = False
         self._closing = False
         self._closed = False

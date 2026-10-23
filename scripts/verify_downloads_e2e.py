@@ -191,14 +191,23 @@ def everything_in(directory: Path) -> list[str]:
     return sorted(p.name for p in directory.rglob("*")) if directory.exists() else []
 
 
+# Where each driver parks a download before lyra decides on it: Playwright's artifacts
+# dir, or the native driver's private download dir (lyra_browser.native.context).
+_PARKING_DIRS = ("playwright-artifacts-*", "lyra-native-downloads-*")
+
+
 def browser_temp_files(root: Path) -> set[str]:
-    """Files in this run's Playwright artifacts dir: where the browser parks a download.
+    """Files in this run's download parking dirs: where the browser parks a download.
 
     ``root`` is the private TMPDIR the run gave the browser (``isolate_tmpdir``), so
     a browser some other process is running cannot put a file in this answer.
     """
     return {
-        str(p) for d in root.glob("playwright-artifacts-*") for p in d.rglob("*") if p.is_file()
+        str(p)
+        for pattern in _PARKING_DIRS
+        for d in root.glob(pattern)
+        for p in d.rglob("*")
+        if p.is_file()
     }
 
 
