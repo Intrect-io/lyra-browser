@@ -35,6 +35,7 @@ from .evaluate import (
     is_function,
     is_stale_context,
 )
+from .frames import FrameRef, FrameTracker
 from .input import Keyboard, Mouse
 from .locator import FrameLocator, Locator
 
@@ -103,6 +104,9 @@ class NativePage:
         self._failed_loads: dict[str, str] = {}
         self.keyboard = Keyboard(self)
         self.mouse = Mouse(self, self.keyboard)
+        self._frame_map = FrameTracker(self)
+        # aria-ref -> (frame id, backend node id), from the latest snapshot only.
+        self._refs: dict[str, tuple[str, int]] = {}
 
     # -- plumbing -------------------------------------------------------------------
 
@@ -129,6 +133,17 @@ class NativePage:
         return await self._context._conn.send(
             method, params, session=self._session, timeout=timeout
         )
+
+    async def _send_on(
+        self, session: str, method: str, params: dict | None = None, *, timeout: float | None = None
+    ) -> dict:
+        """A command to one of this page's sessions (its own, or an OOPIF's)."""
+        if self._closed:
+            raise TargetClosedError()
+        return await self._context._conn.send(method, params, session=session, timeout=timeout)
+
+    def _frame(self, frame_id: str) -> FrameRef:
+        return self._frame_map.frame(frame_id)
 
     def _on(self, method: str, handler: Callable[[dict], None]) -> None:
         self._context._conn.on(method, lambda params, _s: handler(params), session=self._session)
@@ -182,6 +197,7 @@ class NativePage:
                 self._send("Emulation.setDeviceMetricsOverride", metrics, timeout=INIT_TIMEOUT_S)
             )
         await asyncio.gather(*commands)
+        await self._frame_map.watch(self._session)
         tree = await self._send("Page.getFrameTree", timeout=INIT_TIMEOUT_S)
         self._absorb_tree(tree.get("frameTree") or {})
 
@@ -451,8 +467,11 @@ class NativePage:
         cached = self._worlds.get(frame_id)
         if cached is not None:
             return cached
-        reply = await self._send(
-            "Page.createIsolatedWorld", {"frameId": frame_id, "worldName": UTILITY_WORLD}
+        frame = self._frame(frame_id)
+        reply = await self._send_on(
+            frame.session,
+            "Page.createIsolatedWorld",
+            {"frameId": frame_id, "worldName": UTILITY_WORLD},
         )
         context_id = int(reply["executionContextId"])
         self._worlds.put(frame_id, context_id)
@@ -528,9 +547,19 @@ class NativePage:
     def frame_locator(self, selector: str) -> FrameLocator:
         return FrameLocator(self, (selector,))
 
-    async def _resolve_ref(self, ref: str, frame_id: str, context_id: int, group: str) -> list[str]:
-        """The element an ``aria-ref`` names (filled in by the snapshot phase)."""
-        return []
+    def _ref_target(self, ref: str) -> tuple[FrameRef, int] | None:
+        """The frame and node an ``aria-ref`` of the latest snapshot names, or None.
+
+        A ref into a frame that is gone raises, worded as Playwright words it
+        (``describe_failure`` reads "aria-ref selector" as a missing element).
+        """
+        target = self._refs.get(ref)
+        if target is None:
+            return None
+        frame_id, backend = target
+        if frame_id != self.main_frame_id and not self._frame_map.knows(frame_id):
+            raise Error(f'Error: Invalid frame in aria-ref selector "aria-ref={ref}"')
+        return self._frame(frame_id), backend
 
     def _release_group(self, group: str) -> None:
         """Drop the remote objects one locator attempt created; nobody waits for it."""
