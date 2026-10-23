@@ -21,6 +21,7 @@ import base64
 import contextlib
 import itertools
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -40,8 +41,10 @@ from .injected import (
     STEP_JS,
 )
 from .selectors import Part, describe, parse
+from .snapshot import aria_snapshot as _snapshot
 
 if TYPE_CHECKING:
+    from .frames import FrameRef
     from .page import NativePage
 
 DEFAULT_TIMEOUT_MS = 30_000.0
@@ -58,6 +61,14 @@ _DETACHED = (
     "cannot find object with given id",
 )
 _groups = itertools.count(1)
+
+
+@dataclass(frozen=True)
+class _El:
+    """A matched element: its remote object, and the frame (and session) it lives in."""
+
+    frame: FrameRef
+    object_id: str
 
 
 class _Retry:
@@ -123,46 +134,76 @@ class Locator:
 
     # -- resolution ---------------------------------------------------------------
 
-    async def _resolve(self, group: str) -> tuple[str, list[str]]:
-        """The frame the elements live in, and the matched elements (isolated world)."""
+    async def _resolve(self, group: str) -> list[_El]:
+        """The matched elements, each with the frame it lives in (isolated world)."""
         page = self._page
-        frame_id = page.main_frame_id
+        frame = page._frame(page.main_frame_id)
         for frame_selector in self._frames:
-            owners = await self._run(frame_id, [*parse(frame_selector), Part("nth", "0")], group)
+            owners = await self._run(frame, [*parse(frame_selector), Part("nth", "0")], group)
             if not owners:
-                return frame_id, []
-            node = (await page._send("DOM.describeNode", {"objectId": owners[0]}))["node"]
+                return []
+            node = (
+                await page._send_on(frame.session, "DOM.describeNode", {"objectId": owners[0]})
+            )["node"]
             child = node.get("frameId")
             if not child or node.get("nodeName", "").upper() not in ("IFRAME", "FRAME"):
                 raise Error(f"Selector {describe(frame_selector)} does not match an <iframe>")
-            frame_id = child
-        return frame_id, await self._run(frame_id, parse(self._selector), group)
+            frame = page._frame(child)
+        steps = parse(self._selector)
+        start: list[str] | None = None
+        if steps and steps[0].engine == "aria-ref":
+            if self._frames:
+                raise Error(f"aria-ref cannot be used inside a frame locator: {self._selector}")
+            target = page._ref_target(steps[0].body)
+            if target is None:
+                return []
+            frame, backend = target
+            context_id = await page._context_id(frame.id)
+            try:
+                resolved = await page._send_on(
+                    frame.session,
+                    "DOM.resolveNode",
+                    {
+                        "backendNodeId": backend,
+                        "executionContextId": context_id,
+                        "objectGroup": group,
+                    },
+                )
+            except ProtocolError as exc:
+                if _is_detached(exc):
+                    return []
+                raise
+            start, steps = [resolved["object"]["objectId"]], steps[1:]
+        elif any(step.engine == "aria-ref" for step in steps):
+            raise Error(f"aria-ref has to start the selector: {self._selector}")
+        return [_El(frame, oid) for oid in await self._run(frame, steps, group, start)]
 
-    async def _run(self, frame_id: str, steps: list[Part], group: str) -> list[str]:
+    async def _run(
+        self, frame: FrameRef, steps: list[Part], group: str, start: list[str] | None = None
+    ) -> list[str]:
         page = self._page
-        context_id = await page._context_id(frame_id)
-        current: list[str] | None = None
+        context_id = await page._context_id(frame.id)
+        current: list[str] | None = start
         for step in steps:
             if step.engine == "nth":
                 items = current or []
                 index = int(step.body)
                 current = [items[index]] if -len(items) <= index < len(items) else []
             elif step.engine == "role":
-                current = await self._role_step(context_id, step, current, group)
-            elif step.engine == "aria-ref":
-                current = await page._resolve_ref(step.body, frame_id, context_id, group)
+                current = await self._role_step(frame, context_id, step, current, group)
             else:
-                current = await self._js_step(context_id, step, current, group)
+                current = await self._js_step(frame, context_id, step, current, group)
             if not current:
                 return []
         return current or []
 
     async def _js_step(
-        self, context_id: int, step: Part, scopes: list[str] | None, group: str
+        self, frame: FrameRef, context_id: int, step: Part, scopes: list[str] | None, group: str
     ) -> list[str]:
         page = self._page
         arguments = [{"value": step.as_js()}, *({"objectId": o} for o in scopes or ())]
-        reply = await page._send(
+        reply = await page._send_on(
+            frame.session,
             "Runtime.callFunctionOn",
             {
                 "functionDeclaration": STEP_JS,
@@ -177,8 +218,8 @@ class Locator:
         array_id = (reply.get("result") or {}).get("objectId")
         if not array_id:
             return []
-        props = await page._send(
-            "Runtime.getProperties", {"objectId": array_id, "ownProperties": True}
+        props = await page._send_on(
+            frame.session, "Runtime.getProperties", {"objectId": array_id, "ownProperties": True}
         )
         items = [
             (int(p["name"]), p["value"]["objectId"])
@@ -188,11 +229,12 @@ class Locator:
         return [object_id for _i, object_id in sorted(items)]
 
     async def _role_step(
-        self, context_id: int, step: Part, scopes: list[str] | None, group: str
+        self, frame: FrameRef, context_id: int, step: Part, scopes: list[str] | None, group: str
     ) -> list[str]:
         page = self._page
         if scopes is None:
-            reply = await page._send(
+            reply = await page._send_on(
+                frame.session,
                 "Runtime.evaluate",
                 {"expression": "document", "contextId": context_id, "objectGroup": group},
             )
@@ -201,8 +243,10 @@ class Locator:
         seen: set[int] = set()
         for scope in scopes:
             nodes = (
-                await page._send(
-                    "Accessibility.queryAXTree", {"objectId": scope, "role": step.role}
+                await page._send_on(
+                    frame.session,
+                    "Accessibility.queryAXTree",
+                    {"objectId": scope, "role": step.role},
                 )
             ).get("nodes", [])
             for node in nodes:
@@ -217,7 +261,8 @@ class Locator:
                 if not _states_match(node, step.states):
                     continue
                 seen.add(backend)
-                resolved = await page._send(
+                resolved = await page._send_on(
+                    frame.session,
                     "DOM.resolveNode",
                     {
                         "backendNodeId": backend,
@@ -231,13 +276,14 @@ class Locator:
     # -- helpers on one element -----------------------------------------------------
 
     async def _call(
-        self, element: str, source: str, *args: Any, by_value: bool = True, api: str = "Locator"
+        self, element: _El, source: str, *args: Any, by_value: bool = True, api: str = "Locator"
     ) -> Any:
-        reply = await self._page._send(
+        reply = await self._page._send_on(
+            element.frame.session,
             "Runtime.callFunctionOn",
             {
                 "functionDeclaration": source,
-                "objectId": element,
+                "objectId": element.object_id,
                 "arguments": [call_argument(a) for a in args],
                 "returnByValue": by_value,
                 "awaitPromise": True,
@@ -245,13 +291,24 @@ class Locator:
         )
         return decode_result(api, reply)
 
-    async def _point(self, element: str) -> tuple[float, float] | None:
+    async def _quads(self, element: _El) -> list[list[float]]:
+        """The element's content quads in top-level viewport coordinates."""
+        page = self._page
+        quads = (
+            await page._send_on(
+                element.frame.session, "DOM.getContentQuads", {"objectId": element.object_id}
+            )
+        ).get("quads", [])
+        if quads and element.frame.session != page._session:
+            dx, dy = await page._frame_map.viewport_offset(element.frame)
+            quads = [[v + (dx if i % 2 == 0 else dy) for i, v in enumerate(q)] for q in quads]
+        return quads
+
+    async def _point(self, element: _El) -> tuple[float, float] | None:
         """The centre of the element in viewport coordinates, if it is inside the viewport."""
         page = self._page
         try:
-            quads = (await page._send("DOM.getContentQuads", {"objectId": element})).get(
-                "quads", []
-            )
+            quads = await self._quads(element)
         except ProtocolError as exc:
             if _is_detached(exc):
                 raise
@@ -268,9 +325,13 @@ class Locator:
             return None
         return x, y
 
-    async def _scroll_into_view(self, element: str) -> None:
+    async def _scroll_into_view(self, element: _El) -> None:
         with contextlib.suppress(ProtocolError):
-            await self._page._send("DOM.scrollIntoViewIfNeeded", {"objectId": element})
+            await self._page._send_on(
+                element.frame.session,
+                "DOM.scrollIntoViewIfNeeded",
+                {"objectId": element.object_id},
+            )
 
     # -- the retry loop -----------------------------------------------------------
 
@@ -278,11 +339,11 @@ class Locator:
         self,
         api: str,
         timeout: float | None,
-        attempt: Callable[[str, str, list[str]], Awaitable[Any]],
+        attempt: Callable[[_El | None, list[str]], Awaitable[Any]],
         *,
         need_element: bool = True,
     ) -> Any:
-        """Resolve and run ``attempt(frame_id, element, log)`` until it is not ``RETRY``."""
+        """Resolve and run ``attempt(element, log)`` until it is not ``RETRY``."""
         page = self._page
         loop = asyncio.get_running_loop()
         timeout_ms = DEFAULT_TIMEOUT_MS if timeout is None else float(timeout)
@@ -291,9 +352,9 @@ class Locator:
         for round_no in itertools.count():
             group = f"lyra-{next(_groups)}"
             try:
-                frame_id, elements = await self._resolve(group)
+                elements = await self._resolve(group)
                 if elements or not need_element:
-                    result = await attempt(frame_id, elements[0] if elements else "", log)
+                    result = await attempt(elements[0] if elements else None, log)
                     if result is not RETRY:
                         return result
             except ProtocolError as exc:
@@ -309,13 +370,13 @@ class Locator:
             await asyncio.sleep(max(0.0, min(delay, deadline - loop.time())))
         raise AssertionError("unreachable")
 
-    async def _state(self, element: str, log: list[str]) -> dict:
+    async def _state(self, element: _El, log: list[str]) -> dict:
         state = await self._call(element, STATE_JS)
         _note(log, f"  - locator resolved to {state.get('html', '')}", once=True)
         return state
 
     async def _ready(
-        self, element: str, log: list[str], *, enabled: bool = False, editable: bool = False
+        self, element: _El, log: list[str], *, enabled: bool = False, editable: bool = False
     ) -> bool:
         state = await self._state(element, log)
         if not state.get("connected"):
@@ -333,7 +394,7 @@ class Locator:
         return True
 
     async def _pointer(
-        self, element: str, log: list[str], action: str, *, enabled: bool
+        self, element: _El, log: list[str], action: str, *, enabled: bool
     ) -> tuple[float, float] | _Retry:
         """Every check a pointer action makes, and the point it acts at."""
         if not await self._ready(element, log, enabled=enabled):
@@ -361,8 +422,7 @@ class Locator:
     async def count(self) -> int:
         group = f"lyra-{next(_groups)}"
         try:
-            _frame, elements = await self._resolve(group)
-            return len(elements)
+            return len(await self._resolve(group))
         except ProtocolError as exc:
             if _is_detached(exc):
                 self._page._worlds.clear()
@@ -374,7 +434,7 @@ class Locator:
     async def is_visible(self) -> bool:
         group = f"lyra-{next(_groups)}"
         try:
-            _frame, elements = await self._resolve(group)
+            elements = await self._resolve(group)
             if not elements:
                 return False
             return bool((await self._call(elements[0], STATE_JS)).get("visible"))
@@ -382,13 +442,13 @@ class Locator:
             self._page._release_group(group)
 
     async def is_enabled(self, *, timeout: float | None = None) -> bool:
-        async def attempt(_frame: str, element: str, log: list[str]) -> bool:
+        async def attempt(element: _El, log: list[str]) -> bool:
             return bool((await self._state(element, log)).get("enabled"))
 
         return await self._attempts("Locator.is_enabled", timeout, attempt)
 
     async def click(self, *, timeout: float | None = None, **_ignored: Any) -> None:
-        async def attempt(_frame: str, element: str, log: list[str]) -> Any:
+        async def attempt(element: _El, log: list[str]) -> Any:
             point = await self._pointer(element, log, "click", enabled=True)
             if point is RETRY:
                 return RETRY
@@ -399,7 +459,7 @@ class Locator:
         await self._attempts("Locator.click", timeout, attempt)
 
     async def hover(self, *, timeout: float | None = None, **_ignored: Any) -> None:
-        async def attempt(_frame: str, element: str, log: list[str]) -> Any:
+        async def attempt(element: _El, log: list[str]) -> Any:
             point = await self._pointer(element, log, "hover", enabled=False)
             if point is RETRY:
                 return RETRY
@@ -412,7 +472,7 @@ class Locator:
     async def fill(self, value: str, *, timeout: float | None = None, **_ignored: Any) -> None:
         api = "Locator.fill"
 
-        async def attempt(_frame: str, element: str, log: list[str]) -> Any:
+        async def attempt(element: _El, log: list[str]) -> Any:
             if not await self._ready(element, log, enabled=True, editable=True):
                 return RETRY
             prepared = await self._call(element, FILL_JS, api=api)
@@ -430,7 +490,7 @@ class Locator:
         await self._attempts(api, timeout, attempt)
 
     async def press(self, key: str, *, timeout: float | None = None, **_ignored: Any) -> None:
-        async def attempt(_frame: str, element: str, log: list[str]) -> Any:
+        async def attempt(element: _El, log: list[str]) -> Any:
             await self._call(element, FOCUS_JS)
             await self._page.keyboard.press(key)
             return None
@@ -440,7 +500,7 @@ class Locator:
     async def check(self, *, timeout: float | None = None, **_ignored: Any) -> None:
         api = "Locator.check"
 
-        async def attempt(_frame: str, element: str, log: list[str]) -> Any:
+        async def attempt(element: _El, log: list[str]) -> Any:
             state = await self._state(element, log)
             if state.get("checked") is None:
                 raise Error(with_call_log(api, "Error: Not a checkbox or radio button", log))
@@ -477,7 +537,7 @@ class Locator:
         else:
             raise Error(f"{api}: no option to select was given")
 
-        async def attempt(_frame: str, element: str, log: list[str]) -> Any:
+        async def attempt(element: _El, log: list[str]) -> Any:
             if not await self._ready(element, log, enabled=True):
                 return RETRY
             result = await self._call(element, SELECT_JS, want, api=api)
@@ -491,7 +551,7 @@ class Locator:
         return await self._attempts(api, timeout, attempt)
 
     async def input_value(self, *, timeout: float | None = None) -> str:
-        async def attempt(_frame: str, element: str, log: list[str]) -> str:
+        async def attempt(element: _El, log: list[str]) -> str:
             return str(await self._call(element, INPUT_VALUE_JS, api="Locator.input_value"))
 
         return await self._attempts("Locator.input_value", timeout, attempt)
@@ -503,19 +563,21 @@ class Locator:
         paths = [files] if isinstance(files, (str, Path)) else list(files)
         resolved = [str(Path(p).resolve()) for p in paths]
 
-        async def attempt(_frame: str, element: str, log: list[str]) -> Any:
+        async def attempt(element: _El, log: list[str]) -> Any:
             problem = await self._call(element, FILE_INPUT_JS, len(resolved), api=api)
             if problem:
                 raise Error(with_call_log(api, f"Error: {problem}", log))
-            await self._page._send(
-                "DOM.setFileInputFiles", {"files": resolved, "objectId": element}
+            await self._page._send_on(
+                element.frame.session,
+                "DOM.setFileInputFiles",
+                {"files": resolved, "objectId": element.object_id},
             )
             return None
 
         await self._attempts(api, timeout, attempt)
 
     async def inner_text(self, *, timeout: float | None = None) -> str:
-        async def attempt(_frame: str, element: str, log: list[str]) -> str:
+        async def attempt(element: _El, log: list[str]) -> str:
             return str(await self._call(element, INNER_TEXT_JS, api="Locator.inner_text") or "")
 
         return await self._attempts("Locator.inner_text", timeout, attempt)
@@ -534,19 +596,23 @@ class Locator:
             expression if is_function(expression) else f"function () {{ return ({expression}); }}"
         )
 
-        async def attempt(_frame: str, element: str, log: list[str]) -> Any:
-            target = element
+        async def attempt(element: _El, log: list[str]) -> Any:
+            session = element.frame.session
+            target = element.object_id
             if world == MAIN:
-                node = (await self._page._send("DOM.describeNode", {"objectId": element}))["node"]
+                node = (
+                    await self._page._send_on(session, "DOM.describeNode", {"objectId": target})
+                )["node"]
                 target = (
-                    await self._page._send(
-                        "DOM.resolveNode", {"backendNodeId": node["backendNodeId"]}
+                    await self._page._send_on(
+                        session, "DOM.resolveNode", {"backendNodeId": node["backendNodeId"]}
                     )
                 )["object"]["objectId"]
             arguments = [{"objectId": target}]
             if arg is not NO_ARG:
                 arguments.append(call_argument(arg))
-            reply = await self._page._send(
+            reply = await self._page._send_on(
+                session,
                 "Runtime.callFunctionOn",
                 {
                     "functionDeclaration": source,
@@ -562,10 +628,14 @@ class Locator:
         return await self._attempts(api, timeout, attempt)
 
     async def scroll_into_view_if_needed(self, *, timeout: float | None = None) -> None:
-        async def attempt(_frame: str, element: str, log: list[str]) -> Any:
+        async def attempt(element: _El, log: list[str]) -> Any:
             if not await self._ready(element, log):
                 return RETRY
-            await self._page._send("DOM.scrollIntoViewIfNeeded", {"objectId": element})
+            await self._page._send_on(
+                element.frame.session,
+                "DOM.scrollIntoViewIfNeeded",
+                {"objectId": element.object_id},
+            )
             return None
 
         await self._attempts("Locator.scroll_into_view_if_needed", timeout, attempt)
@@ -573,13 +643,11 @@ class Locator:
     async def screenshot(self, *, timeout: float | None = None, **_ignored: Any) -> bytes:
         api = "Locator.screenshot"
 
-        async def attempt(_frame: str, element: str, log: list[str]) -> Any:
+        async def attempt(element: _El, log: list[str]) -> Any:
             if not await self._ready(element, log):
                 return RETRY
             await self._scroll_into_view(element)
-            quads = (await self._page._send("DOM.getContentQuads", {"objectId": element})).get(
-                "quads", []
-            )
+            quads = await self._quads(element)
             if not quads:
                 _note(log, "  - element is not visible")
                 return RETRY
@@ -612,8 +680,8 @@ class Locator:
         if state not in ("attached", "detached", "visible", "hidden"):
             raise Error(f"{api}: state: expected one of (attached|detached|visible|hidden)")
 
-        async def attempt(_frame: str, element: str, log: list[str]) -> Any:
-            if not element:
+        async def attempt(element: _El | None, log: list[str]) -> Any:
+            if element is None:
                 return None if state in ("detached", "hidden") else RETRY
             if state == "attached":
                 return None
@@ -624,8 +692,37 @@ class Locator:
 
         await self._attempts(api, timeout, attempt, need_element=False)
 
-    async def aria_snapshot(self, *, timeout: float | None = None) -> str:
-        raise Error("Locator.aria_snapshot is not implemented by the native driver yet")
+    async def aria_snapshot(
+        self,
+        *,
+        timeout: float | None = None,
+        depth: int | None = None,
+        mode: str | None = None,
+        boxes: bool = False,
+    ) -> str:
+        """Playwright's YAML snapshot of this element's subtree (see ``snapshot.py``).
+
+        ``mode="ai"`` adds refs and replaces the page's ref table; ``boxes`` adds geometry.
+        The keyword names are what ``read_page`` feature-detects.
+        """
+        page = self._page
+
+        async def attempt(element: _El, log: list[str]) -> str:
+            node = (
+                await page._send_on(
+                    element.frame.session, "DOM.describeNode", {"objectId": element.object_id}
+                )
+            )["node"]
+            return await _snapshot(
+                page,
+                element.frame,
+                node.get("backendNodeId"),
+                refs=mode == "ai",
+                boxes=boxes,
+                depth=depth,
+            )
+
+        return await self._attempts("Locator.aria_snapshot", timeout, attempt)
 
 
 def _note(log: list[str], line: str, *, once: bool = False) -> None:
