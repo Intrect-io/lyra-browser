@@ -32,7 +32,6 @@ from .evaluate import (
     WorldCache,
     call_argument,
     decode_result,
-    is_function,
     is_stale_context,
 )
 from .events import (
@@ -186,6 +185,11 @@ class NativePage:
         self._on("Network.loadingFailed", self._on_loading_failed)
         commands = [
             self._send("Page.enable", timeout=INIT_TIMEOUT_S),
+            # A page the window does not focus (headless, a background tab) still takes
+            # keys and reports document.hasFocus(), as Playwright arranges it.
+            self._send(
+                "Emulation.setFocusEmulationEnabled", {"enabled": True}, timeout=INIT_TIMEOUT_S
+            ),
             self._send("Page.setLifecycleEventsEnabled", {"enabled": True}, timeout=INIT_TIMEOUT_S),
             self._send("Network.enable", timeout=INIT_TIMEOUT_S),
         ]
@@ -356,7 +360,7 @@ class NativePage:
             try:
                 await asyncio.wait_for(event.wait(), remaining)
             except TimeoutError:
-                pass
+                pass  # the loop re-reads ready() and raises the timeout with its call log
             finally:
                 self._waiters.remove(event.set)
 
@@ -623,20 +627,46 @@ class NativePage:
         this_object: str | None,
     ) -> Any:
         common = {"returnByValue": True, "awaitPromise": True, "userGesture": True}
-        if is_function(source) or this_object is not None:
+        if this_object is not None:
             arguments = [] if arg is NO_ARG else [call_argument(arg)]
-            params: dict = {"functionDeclaration": source, "arguments": arguments, **common}
-            if this_object is not None:
-                params["objectId"] = this_object
-            elif world == MAIN:
-                params["objectId"] = await self._main_world_global()
-            else:
-                params["executionContextId"] = await self._context_id(frame_id)
+            params: dict = {
+                "functionDeclaration": source,
+                "arguments": arguments,
+                "objectId": this_object,
+                **common,
+            }
             return decode_result(api, await self._send("Runtime.callFunctionOn", params))
-        params = {"expression": source, **common}
+        # Function or expression is decided by the browser, as Playwright decides it: the
+        # source is evaluated once as an expression, and only a function result is called.
+        # An IIFE such as ``(() => {...})()`` therefore runs exactly once.
+        expression = source.strip().rstrip(";")
+        params = {"expression": f"({expression})", "awaitPromise": True, "userGesture": True}
         if world != MAIN:
             params["contextId"] = await self._context_id(frame_id)
-        return decode_result(api, await self._send("Runtime.evaluate", params))
+        reply = await self._send("Runtime.evaluate", params)
+        details = reply.get("exceptionDetails") or {}
+        if "SyntaxError" in str((details.get("exception") or {}).get("description", "")):
+            # Statements, not an expression (``a = 1; b()``): run them as written.
+            reply = await self._send("Runtime.evaluate", {**params, "expression": expression})
+        result = reply.get("result") or {}
+        if reply.get("exceptionDetails") or "objectId" not in result:
+            return decode_result(api, reply)
+        if result.get("type") == "function":
+            arguments = [] if arg is NO_ARG else [call_argument(arg)]
+            call = "function (...args) { return this(...args); }"
+        else:
+            arguments = []
+            call = "function () { return this; }"
+        reply = await self._send(
+            "Runtime.callFunctionOn",
+            {
+                "functionDeclaration": call,
+                "objectId": result["objectId"],
+                "arguments": arguments,
+                **common,
+            },
+        )
+        return decode_result(api, reply)
 
     async def evaluate(
         self, expression: str, arg: Any = NO_ARG, *, world: str | None = None
@@ -668,6 +698,21 @@ class NativePage:
         if frame_id != self.main_frame_id and not self._frame_map.knows(frame_id):
             raise Error(f'Error: Invalid frame in aria-ref selector "aria-ref={ref}"')
         return self._frame(frame_id), backend
+
+    async def aria_snapshot(
+        self,
+        *,
+        timeout: float | None = None,
+        depth: int | None = None,
+        mode: str | None = None,
+        boxes: bool = False,
+    ) -> str:
+        """The whole document's snapshot, as ``Locator.aria_snapshot`` writes it."""
+        from .snapshot import aria_snapshot
+
+        return await aria_snapshot(
+            self, self._frame(self.main_frame_id), None, refs=mode == "ai", boxes=boxes, depth=depth
+        )
 
     def _release_group(self, group: str) -> None:
         """Drop the remote objects one locator attempt created; nobody waits for it."""
@@ -726,7 +771,7 @@ class NativePage:
         try:
             await self._context._browser_send("Target.closeTarget", {"targetId": self.target_id})
         except (ProtocolError, TargetClosedError):
-            pass
+            pass  # already gone: the aim, a closed tab, holds
         with contextlib.suppress(Exception):
             await self._wait(
                 lambda: self._closed, asyncio.get_running_loop().time() + 5, "Page.close", []

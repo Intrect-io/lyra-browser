@@ -32,6 +32,23 @@ moving parts, two answers:
    VEGA's UI should detect this status and show a one-click "Install Chrome"
    prompt — the UI-first onboarding path, not a CLI error.
 
+**Without Playwright at all (opt-in, `LYRA_BROWSER_DRIVER=native`):** lyra's own driver
+drives the installed Chrome or Edge over raw DevTools. Point 1 then goes away:
+VEGA does not have to bundle `playwright`, and the refs work whatever Playwright version
+VEGA's runtime would have shipped. The tree view comes from Chrome's own accessibility
+tree. Point 2 is unchanged (the user's Chrome or Edge, or `browser_unavailable`).
+Set it in the server's `env`:
+
+```json
+"env": {"LYRA_BROWSER_DRIVER": "native"}
+```
+
+It runs with the `cdp` guard, keeps Chrome's sandbox on and never sends
+`Runtime.enable`; see the README's "Drivers". `playwright` is still a declared
+dependency of the package until `native` becomes the default. A frozen VEGA runtime
+that leaves it out works with `native` (measured with the import blocked), but not with
+`auto`.
+
 The pip + `playwright install chromium` commands below are the **developer** path
 for working on this repo, never something an end user runs.
 

@@ -770,6 +770,46 @@ Windows are not measured. `python scripts/verify_npx_e2e.py` reproduces it. See
 **Deploying it as a remote server (Cloudflare Containers):** see
 [docs/CLOUDFLARE.md](https://github.com/Intrect-io/lyra-browser/blob/master/docs/CLOUDFLARE.md).
 
+## Drivers
+
+lyra drives the browser through one of three drivers, picked with `LYRA_BROWSER_DRIVER`:
+
+| Driver | Needs | Notes |
+|---|---|---|
+| `auto` (default) | `patchright` or `playwright` | `patchright` when installed, else `playwright`. |
+| `patchright` / `playwright` | that package | Pins one. |
+| `native` (opt-in) | Chrome, Edge or Chromium, nothing else | lyra's own driver (`lyra_browser.native`): Chrome over raw DevTools on lyra's own WebSocket. No Playwright, no Node, no chromedriver. Measured: the real-browser runs pass with `playwright` and `patchright` blocked from importing, and no Playwright module loads. |
+
+What `native` does differently, on purpose:
+
+- **No `Runtime.enable`.** That is the one DevTools call Kasada refuses a browser on.
+  Scripts run in an isolated world the page cannot see or tamper with. A script that
+  reads the page's own globals (`window.CKEDITOR`) asks for the main world. The UAT
+  recorder's console and page-error observers are the only thing that turns
+  `Runtime.enable` on, and only for the pages they observe.
+- **The sandbox stays on.** Playwright always passes `--no-sandbox`. This browser holds
+  real logins, so `native` keeps Chrome's renderer sandbox unless `LYRA_BROWSER_SANDBOX`
+  is off (a container without user namespaces).
+- **The `cdp` guard, always.** `native` has no `context.route`. Asking for it selects
+  `LYRA_BROWSER_GUARD=cdp`, which judges every redirect hop.
+- **The same switches as Playwright otherwise.** The list was measured from Playwright
+  1.64's launch. It keeps a shared profile's cookies readable across drivers and keeps
+  the back/forward cache off, which the guard relies on.
+
+Status: opt-in, not yet at parity. Selectors are css (open shadow roots pierced),
+`text=`, `role=…[name=…]` (from Chrome's accessibility tree), `xpath=`, `id=`,
+`data-testid=`, `nth=`, `:visible` and `:has-text()`; any other engine is refused by name.
+`read_page(mode="tree")` matched Playwright's on 75 of 75 elements in the same in-view
+order, and its refs reach into same-site and cross-site iframes
+(`python scripts/verify_native_parity_e2e.py`). The repo's own gates run on it with
+`LYRA_BROWSER_DRIVER=native python scripts/verify_<gate>_e2e.py` (or `--driver native`
+where a gate has that flag). On 2026-10-23 they found gaps the parity check does not
+cover: Playwright calls the gates make directly (`page.content`, `page.input_value`,
+`context.set_default_timeout`), the `internal:control=enter-frame` selector, a key press
+after some flows, a navigation away from a `beforeunload` page, a download a popup starts,
+and an unapproved popup's tab. Until those gates pass, keep the default driver.
+
+
 ## Configuration (env)
 
 | Var | Default | Meaning |

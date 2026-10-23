@@ -2359,7 +2359,9 @@ def main() -> int:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--headless-only", action="store_true")
     group.add_argument("--headful-only", action="store_true")
-    parser.add_argument("--driver", choices=["auto", "playwright", "patchright"], default="auto")
+    parser.add_argument(
+        "--driver", choices=["auto", "playwright", "patchright", "native"], default="auto"
+    )
     parser.add_argument(
         "--popup-runs", type=int, default=10, help="runs of every popup scenario (scenarios)"
     )
