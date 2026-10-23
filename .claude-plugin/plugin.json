@@ -1,7 +1,7 @@
 {
   "name": "lyra-browser",
   "displayName": "lyra browser",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A persistent, logged-in Chromium that Claude drives and you can watch and take over. Navigation, form sending, uploads, downloads and publishing each ask you first through a dialog; a guard layer enforces the answer against every request, whatever caused it.",
   "author": {
     "name": "Intrect",
