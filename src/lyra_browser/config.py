@@ -211,7 +211,7 @@ def _as_optional_bool(value: str | None) -> bool | None:
 _CHOICES: dict[str, frozenset[str]] = {
     "enforcement_mode": frozenset({"observe", "enforce"}),
     "consent_channel": frozenset({"auto", "elicit", "legacy", "off", "autonomous"}),
-    "driver": frozenset({"auto", "patchright", "playwright"}),
+    "driver": frozenset({"auto", "patchright", "playwright", "native"}),
     "guard_backend": frozenset({"route", "cdp"}),
 }
 
@@ -471,9 +471,11 @@ class Config:
     # and a later undeclared one can slip past the observation. It measures false
     # positives accurately; it under-reports what enforce would catch.
     enforcement_mode: str = "enforce"
-    # Which Playwright to launch with. "patchright" is a drop-in fork that does
-    # not send Runtime.enable — the one CDP call Kasada refuses on
-    # — and "auto" takes it when installed. See session.load_driver.
+    # Which driver launches the browser. "patchright" is a drop-in fork of Playwright
+    # that does not send Runtime.enable — the one CDP call Kasada refuses on — and
+    # "auto" takes it when installed. "native" needs no Playwright at all: Chrome over
+    # raw DevTools (lyra_browser.native), opt-in until it covers every tool, and always
+    # with the cdp guard. See session.load_driver.
     driver: str = "auto"
     # Where the navigation guard sits. "route" is Playwright's context.route: it sees
     # the first request of a redirect chain only, and Playwright's cache-disable that
@@ -482,6 +484,10 @@ class Config:
     # debugging port (cdp_guard.py); that port is an open service, see README.md
     # "Debugging port". With "cdp" the session closes the window if the guard is lost.
     guard_backend: str = "route"
+    # Native driver only: keep Chrome's renderer sandbox on. Playwright always launches
+    # with --no-sandbox; the native driver does not, because this browser holds real
+    # logins. A container that cannot sandbox (no user namespaces) turns it off.
+    sandbox: bool = True
 
     def __post_init__(self) -> None:
         if self.client not in CLIENTS:
@@ -497,6 +503,10 @@ class Config:
         for name, allowed in _CHOICES.items():
             if getattr(self, name) not in allowed:
                 setattr(self, name, type(self).__dataclass_fields__[name].default)
+        # The native driver has no context.route: its guard is the cdp sidecar, the
+        # stricter of the two (every redirect hop), so asking for native asks for that.
+        if self.driver == "native":
+            self.guard_backend = "cdp"
         # Turning approval off is an explicit instruction not to ask anyone.
         if not self.require_approval:
             self.consent_channel = "off"
@@ -578,6 +588,7 @@ class Config:
             guard_backend=(
                 _env("LYRA_BROWSER_GUARD") or cls.__dataclass_fields__["guard_backend"].default
             ),
+            sandbox=_as_bool(_env("LYRA_BROWSER_SANDBOX"), default=True),
             capture_keep=_as_int(
                 _env("LYRA_BROWSER_CAPTURE_KEEP"),
                 default=cls.__dataclass_fields__["capture_keep"].default,

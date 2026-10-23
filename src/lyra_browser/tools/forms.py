@@ -32,6 +32,7 @@ handed to a page cannot be recalled.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from pathlib import Path
 
 from fastmcp import FastMCP
@@ -451,6 +452,26 @@ async def _await_settle(page, dialogs: list | None = None) -> dict:
     return after
 
 
+def _main_world(target) -> dict:
+    """Keyword arguments that run ``target.evaluate`` in the page's own world.
+
+    ``window.CKEDITOR`` lives there, and ``_FORM_JS``, ``_SYNC_EDITOR_JS`` and
+    ``_DRAFT_JS`` read it. Playwright evaluates there already. patchright
+    (``isolated_context``) and the native driver (``world``) default to an isolated
+    world, where the editor instance is invisible and the sync quietly does nothing.
+    The signature decides, as it does for ``aria_snapshot``.
+    """
+    try:
+        params = inspect.signature(target.evaluate).parameters
+    except (TypeError, ValueError):
+        return {}
+    if "world" in params:
+        return {"world": "main"}
+    if "isolated_context" in params:
+        return {"isolated_context": False}
+    return {}
+
+
 def register(mcp: FastMCP, ctx: ServerContext) -> None:
     @mcp.tool
     async def read_form(
@@ -480,6 +501,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         data = await page.evaluate(
             _FORM_JS,
             {"root": root, "limit": max(1, min(max_fields, 500)), "whole": whole_page},
+            **_main_world(page),
         )
         ctx.audit.record("read_form", {"root": root, "fields": data.get("fieldCount")})
         return {"status": "ok", "url": page.url, **data}
@@ -664,7 +686,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             # owns the editor, which for a framed body is the parent, and matching
             # it from inside the frame does not work.
             top = page.locator("html").first
-            synced = await top.evaluate(_SYNC_EDITOR_JS, {"field": field}) or {}
+            synced = await top.evaluate(_SYNC_EDITOR_JS, {"field": field}, **_main_world(top)) or {}
             ctx.audit.record("set_editor", audit, origin=origin.describe())
             result = {"status": "ok", "url": page.url, "surface": surface}
             if synced.get("synced"):
@@ -772,7 +794,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         if err:
             return err
         cap = max(80, min(max_chars, 4000))
-        dump = await page.evaluate(_DRAFT_JS, {"limit": cap})
+        dump = await page.evaluate(_DRAFT_JS, {"limit": cap}, **_main_world(page))
         ctx.audit.record(
             "read_draft",
             {"fields": dump.get("fieldCount"), "editors": len(dump.get("editors", []))},
