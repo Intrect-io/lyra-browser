@@ -21,13 +21,14 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from .connection import Connection
 from .dialog import Dialog
 from .download import Download
 from .errors import Error, ProtocolError, TargetClosedError
 from .launcher import BrowserProcess, launch
-from .page import NativePage
+from .page import INIT_TIMEOUT_S, NativePage
 
 _PAGE_ATTACH = {
     "autoAttach": True,
@@ -40,6 +41,40 @@ CLOSE_TIMEOUT_S = 5.0
 # How long a navigation that ended in net::ERR_ABORTED waits for Chrome to report the
 # download it became, before it is read as an ordinary abort.
 DOWNLOAD_GRACE_S = 0.5
+
+
+def _cookie_out(c: dict) -> dict:
+    out = {
+        "name": c.get("name", ""),
+        "value": c.get("value", ""),
+        "domain": c.get("domain", ""),
+        "path": c.get("path", "/"),
+        "expires": c.get("expires", -1) if not c.get("session") else -1,
+        "httpOnly": bool(c.get("httpOnly")),
+        "secure": bool(c.get("secure")),
+    }
+    if c.get("sameSite"):
+        out["sameSite"] = c["sameSite"]
+    return out
+
+
+def _cookie_in(c: dict) -> dict:
+    keep = ("name", "value", "url", "domain", "path", "secure", "httpOnly", "sameSite", "expires")
+    out = {k: c[k] for k in keep if k in c and c[k] is not None}
+    if out.get("expires", 0) == -1:
+        out.pop("expires")
+    return out
+
+
+def _cookie_matches(cookie: dict, url: str) -> bool:
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    domain = cookie["domain"].lstrip(".")
+    if host != domain and not (cookie["domain"].startswith(".") and host.endswith("." + domain)):
+        return False
+    if cookie["secure"] and parts.scheme != "https":
+        return False
+    return (parts.path or "/").startswith(cookie["path"])
 
 
 class NativeCDPSession:
@@ -74,6 +109,7 @@ class NativeContext:
         self._closing = False
         self._closed = False
         self._setups: set[asyncio.Task] = set()
+        self._timeout_default: float | None = None
         # Handed to cdp_guard so it never has to read the (already deleted) port file.
         self.debugging_endpoint: tuple[int, str] = process.endpoint
 
@@ -160,11 +196,24 @@ class NativeContext:
     async def _setup(self, page: NativePage) -> None:
         headless = bool(self._options.get("headless"))
         try:
+            # First, before anything is set up: a window.open popup arrives paused even
+            # though this connection asked for no waiting, and the click that opened it gets
+            # no answer until it runs (measured: Input.dispatchMouseEvent mouseReleased hung,
+            # and a noopener popup's setup commands waited behind the pause). Playwright
+            # releases every tab it attaches the same way. cdp_guard's own hold on the tab is
+            # not released by this: measured, 60 of 60 refused popup and iframe requests
+            # never reached the server (headless and headful).
+            await page._send("Runtime.runIfWaitingForDebugger", timeout=INIT_TIMEOUT_S)
             await page._initialize(
                 headless_viewport=self._options.get("viewport") if headless else None,
                 screen=self._options.get("screen") if headless else None,
                 block_service_workers=self._options.get("service_workers") == "block",
             )
+            if page._opener_id and not page.url:
+                # A popup opened with a URL is reported once that URL commits, as Playwright
+                # reports it: one whose first request is refused (by the guard, or a 204)
+                # never shows a document and is never a tab anyone is told about.
+                await page._wait(lambda: bool(page.url), float("inf"), "popup", [])
         except (ProtocolError, TargetClosedError, TimeoutError):
             # Closed while being set up (a popup that shut itself): never reported.
             page._gone()
@@ -209,6 +258,10 @@ class NativeContext:
             return
         self._emit("dialog", dialog)
 
+    def _reported(self, page: NativePage) -> bool:
+        future = self._ready.get(page.target_id)
+        return future is not None and future.done() and future.exception() is None
+
     def _page_for_frame(self, frame_id: str) -> NativePage | None:
         page = self._pages.get(frame_id)
         if page is not None:
@@ -217,6 +270,10 @@ class NativeContext:
 
     def _on_download_begin(self, params: dict, session: str | None) -> None:
         page = self._page_for_frame(params.get("frameId", ""))
+        # A popup that went straight to a file never showed a document, so it was never
+        # reported and nobody listens on it: the download belongs to the tab that opened it.
+        while page is not None and not self._reported(page) and page._opener_id:
+            page = self._pages.get(page._opener_id)
         if page is None:
             live = [p for p in self._pages.values() if not p.is_closed()]
             page = live[-1] if live else None
@@ -271,6 +328,29 @@ class NativeContext:
                 handler(*args)
             except Exception:  # noqa: BLE001 — a listener's failure is its own
                 pass
+
+    def set_default_timeout(self, timeout: float) -> None:
+        self._timeout_default = float(timeout)
+
+    async def cookies(self, urls: str | list[str] | None = None) -> list[dict]:
+        """The profile's cookies in Playwright's shape, those ``urls`` would send if given."""
+        raw = (await self._browser_send("Storage.getCookies")).get("cookies", [])
+        cookies = [_cookie_out(c) for c in raw]
+        if urls is None:
+            return cookies
+        wanted = [urls] if isinstance(urls, str) else list(urls)
+        return [c for c in cookies if any(_cookie_matches(c, u) for u in wanted)]
+
+    async def add_cookies(self, cookies: list[dict]) -> None:
+        await self._browser_send(
+            "Storage.setCookies", {"cookies": [_cookie_in(c) for c in cookies]}
+        )
+
+    async def clear_cookies(self, **_filters: Any) -> None:
+        await self._browser_send("Storage.clearCookies")
+
+    def set_default_navigation_timeout(self, timeout: float) -> None:
+        self._timeout_default = float(timeout)
 
     async def new_page(self) -> NativePage:
         reply = await self._browser_send("Target.createTarget", {"url": "about:blank"})

@@ -100,6 +100,7 @@ class NativePage:
         self._handlers: dict[str, list[Callable]] = {}
         self._worlds = WorldCache()
         self._frames: set[str] = {target_id}
+        self._frame_urls: dict[str, str] = {}
         self._loader: str | None = None
         # Main-frame commits, numbered, so a navigation can tell its own commit from
         # one that replaced it.
@@ -111,12 +112,19 @@ class NativePage:
         self._outcome: _Outcome | None = None
         self._failed_loads: dict[str, str] = {}
         self._requests: dict[str, Request] = {}
+        self._timeout_default: float | None = None
+        self._nav_requests = 0
+        self._stops = 0
         self._runtime_on = False
         self.keyboard = Keyboard(self)
         self.mouse = Mouse(self, self.keyboard)
         self._frame_map = FrameTracker(self)
         # aria-ref -> (frame id, backend node id), from the latest snapshot only.
         self._refs: dict[str, tuple[str, int]] = {}
+        # Stable within one document: (frame id, backend node id) -> ref, frame -> prefix.
+        self._ref_ids: dict[tuple[str, int], str] = {}
+        self._ref_counts: dict[str, int] = {}
+        self._frame_prefixes: dict[str, str] = {}
 
     # -- plumbing -------------------------------------------------------------------
 
@@ -152,6 +160,18 @@ class NativePage:
             raise TargetClosedError()
         return await self._context._conn.send(method, params, session=session, timeout=timeout)
 
+    def _default_timeout(self) -> float:
+        """``set_default_timeout`` on this page, else on the context, else 30 s."""
+        if self._timeout_default is not None:
+            return self._timeout_default
+        return self._context._timeout_default or DEFAULT_TIMEOUT_MS
+
+    def set_default_timeout(self, timeout: float) -> None:
+        self._timeout_default = float(timeout)
+
+    def set_default_navigation_timeout(self, timeout: float) -> None:
+        self._timeout_default = float(timeout)
+
     def _frame(self, frame_id: str) -> FrameRef:
         return self._frame_map.frame(frame_id)
 
@@ -179,6 +199,7 @@ class NativePage:
         self._on("Page.frameDetached", self._on_frame_detached)
         self._on("Page.lifecycleEvent", self._on_lifecycle)
         self._on("Page.frameStoppedLoading", self._on_stopped_loading)
+        self._on("Page.frameRequestedNavigation", self._on_requested_navigation)
         self._on("Page.javascriptDialogOpening", self._on_dialog)
         self._on("Network.requestWillBeSent", self._on_request)
         self._on("Network.responseReceived", self._on_response)
@@ -221,6 +242,7 @@ class NativePage:
         frame = node.get("frame") or {}
         if frame.get("id"):
             self._frames.add(frame["id"])
+            self._frame_urls[frame["id"]] = frame.get("url", "") + frame.get("urlFragment", "")
             if not frame.get("parentId"):
                 self._url = frame.get("url", self._url) + frame.get("urlFragment", "")
                 self._loader = frame.get("loaderId", self._loader)
@@ -233,11 +255,16 @@ class NativePage:
         frame = params.get("frame") or {}
         frame_id = frame.get("id", "")
         self._frames.add(frame_id)
+        self._frame_urls[frame_id] = frame.get("url", "") + frame.get("urlFragment", "")
         self._worlds.forget(frame_id)
         if frame.get("parentId"):
             return
         self._url = frame.get("url", "") + frame.get("urlFragment", "")
         self._loader = frame.get("loaderId")
+        # A new document: its elements are new, and so are their refs.
+        self._ref_ids.clear()
+        self._ref_counts.clear()
+        self._frame_prefixes.clear()
         self._commit_seq += 1
         self._commits.append((self._commit_seq, self._loader or ""))
         del self._commits[:-32]
@@ -257,6 +284,7 @@ class NativePage:
         self._worlds.forget(frame_id)
         if frame_id != self.target_id:
             self._frames.discard(frame_id)
+            self._frame_urls.pop(frame_id, None)
 
     def _on_lifecycle(self, params: dict) -> None:
         if params.get("frameId") != self.target_id:
@@ -270,8 +298,48 @@ class NativePage:
         self._notify()
 
     def _on_stopped_loading(self, params: dict) -> None:
-        if params.get("frameId") == self.target_id and self._outcome is not None:
+        if params.get("frameId") != self.target_id:
+            return
+        self._stops += 1
+        if self._outcome is not None:
             self._outcome.settle("stopped")
+        self._notify()
+
+    def _on_requested_navigation(self, params: dict) -> None:
+        if params.get("frameId") == self.target_id and params.get("disposition") == "currentTab":
+            self._nav_requests += 1
+            self._notify()
+
+    def _nav_marks(self) -> tuple[int, int, int]:
+        """(navigations requested, commits, loads stopped) of the main frame so far."""
+        return self._nav_requests, self._commit_seq, self._stops
+
+    async def _settle_scheduled(
+        self,
+        before: tuple[int, int, int],
+        deadline: float,
+        api: str,
+        log: list[str],
+        timeout_ms: float,
+    ) -> None:
+        """After an action: wait for a navigation it requested to commit, as Playwright does.
+
+        Over when the frame commits, or the load stops (refused by the guard, a 204, a
+        download), or a newer request replaces it. A navigation the action did not
+        request (a timer that fires later) is not waited for.
+        """
+        await asyncio.sleep(0.05)  # the request event can trail the input's answer
+        if self._nav_requests == before[0]:
+            return
+        log.append("  - waiting for scheduled navigations to finish")
+        self._timeout_ms = timeout_ms
+        await self._wait(
+            lambda: self._commit_seq > before[1] or self._stops > before[2] or self._closed,
+            deadline,
+            api,
+            log,
+        )
+        log.append("  - navigated")
 
     def _on_request(self, params: dict) -> None:
         if not self._observed():
@@ -407,7 +475,7 @@ class NativePage:
         return self._responses.get(loader)
 
     def _deadline(self, timeout: float | None) -> float:
-        self._timeout_ms = DEFAULT_TIMEOUT_MS if timeout is None else float(timeout)
+        self._timeout_ms = self._default_timeout() if timeout is None else float(timeout)
         if self._timeout_ms <= 0:
             return float("inf")
         return asyncio.get_running_loop().time() + self._timeout_ms / 1000
@@ -626,6 +694,7 @@ class NativePage:
         frame_id: str,
         this_object: str | None,
     ) -> Any:
+        session = self._frame(frame_id).session
         common = {"returnByValue": True, "awaitPromise": True, "userGesture": True}
         if this_object is not None:
             arguments = [] if arg is NO_ARG else [call_argument(arg)]
@@ -635,7 +704,9 @@ class NativePage:
                 "objectId": this_object,
                 **common,
             }
-            return decode_result(api, await self._send("Runtime.callFunctionOn", params))
+            return decode_result(
+                api, await self._send_on(session, "Runtime.callFunctionOn", params)
+            )
         # Function or expression is decided by the browser, as Playwright decides it: the
         # source is evaluated once as an expression, and only a function result is called.
         # An IIFE such as ``(() => {...})()`` therefore runs exactly once.
@@ -643,11 +714,13 @@ class NativePage:
         params = {"expression": f"({expression})", "awaitPromise": True, "userGesture": True}
         if world != MAIN:
             params["contextId"] = await self._context_id(frame_id)
-        reply = await self._send("Runtime.evaluate", params)
+        reply = await self._send_on(session, "Runtime.evaluate", params)
         details = reply.get("exceptionDetails") or {}
         if "SyntaxError" in str((details.get("exception") or {}).get("description", "")):
             # Statements, not an expression (``a = 1; b()``): run them as written.
-            reply = await self._send("Runtime.evaluate", {**params, "expression": expression})
+            reply = await self._send_on(
+                session, "Runtime.evaluate", {**params, "expression": expression}
+            )
         result = reply.get("result") or {}
         if reply.get("exceptionDetails") or "objectId" not in result:
             return decode_result(api, reply)
@@ -657,7 +730,8 @@ class NativePage:
         else:
             arguments = []
             call = "function () { return this; }"
-        reply = await self._send(
+        reply = await self._send_on(
+            session,
             "Runtime.callFunctionOn",
             {
                 "functionDeclaration": call,
@@ -679,11 +753,52 @@ class NativePage:
 
     # -- elements ---------------------------------------------------------------------
 
+    async def content(self) -> str:
+        """The document's HTML, doctype included."""
+        return str(
+            await self.evaluate(
+                "() => (document.doctype ? new XMLSerializer().serializeToString(document.doctype)"
+                " : '') + (document.documentElement ? document.documentElement.outerHTML : '')"
+            )
+            or ""
+        )
+
+    async def click(self, selector: str, *, timeout: float | None = None, **kwargs: Any) -> None:
+        await self.locator(selector).first.click(timeout=timeout, **kwargs)
+
+    async def input_value(self, selector: str, *, timeout: float | None = None) -> str:
+        return await self.locator(selector).first.input_value(timeout=timeout)
+
+    @property
+    def main_frame(self) -> NativeFrame:
+        return NativeFrame(self, self.main_frame_id)
+
+    @property
+    def frames(self) -> list[NativeFrame]:
+        """The main frame first, then every other frame this page knows, OOPIFs included."""
+        others = [f for f in self._frame_urls if f != self.main_frame_id]
+        others += [f for f in self._frame_map._session_of if f not in self._frame_urls]
+        return [self.main_frame, *(NativeFrame(self, f) for f in others)]
+
     def locator(self, selector: str) -> Locator:
         return Locator(self, selector)
 
     def frame_locator(self, selector: str) -> FrameLocator:
         return FrameLocator(self, (selector,))
+
+    def _ref_for(self, frame_id: str, backend: int, prefix: str) -> str:
+        key = (frame_id, backend)
+        ref = self._ref_ids.get(key)
+        if ref is None:
+            self._ref_counts[prefix] = self._ref_counts.get(prefix, 0) + 1
+            ref = self._ref_ids[key] = f"{prefix}e{self._ref_counts[prefix]}"
+        return ref
+
+    def _frame_prefix(self, frame_id: str) -> str:
+        prefix = self._frame_prefixes.get(frame_id)
+        if prefix is None:
+            prefix = self._frame_prefixes[frame_id] = f"f{len(self._frame_prefixes) + 1}"
+        return prefix
 
     def _ref_target(self, ref: str) -> tuple[FrameRef, int] | None:
         """The frame and node an ``aria-ref`` of the latest snapshot names, or None.
@@ -786,3 +901,40 @@ class NativePage:
 def _write(path: str, data: bytes) -> None:
     with open(path, "wb") as fh:
         fh.write(data)
+
+
+class NativeFrame:
+    """The slice of Playwright's ``Frame`` the gates read: its URL, scripts, its load."""
+
+    def __init__(self, page: NativePage, frame_id: str) -> None:
+        self.page = page
+        self.id = frame_id
+
+    @property
+    def url(self) -> str:
+        if self.id == self.page.main_frame_id:
+            return self.page.url
+        return self.page._frame_urls.get(self.id, "")
+
+    async def evaluate(self, expression: str, arg: Any = NO_ARG) -> Any:
+        """In the frame's isolated world, as ``Page.evaluate`` runs by default."""
+        return await self.page._run("Frame.evaluate", expression, arg, None, self.id)
+
+    async def wait_for_load_state(
+        self, state: str = "load", *, timeout: float | None = None
+    ) -> None:
+        api = "Frame.wait_for_load_state"
+        ready = "complete" if state != "domcontentloaded" else "interactive"
+        loop = asyncio.get_running_loop()
+        budget = (self.page._default_timeout() if timeout is None else float(timeout)) / 1000
+        deadline = loop.time() + budget
+        while True:
+            try:
+                current = await self.evaluate("document.readyState")
+            except Error:
+                current = ""
+            if current == "complete" or current == ready:
+                return
+            if loop.time() >= deadline:
+                raise timeout_error(api, budget * 1000, [f'waiting for "{state}"'])
+            await asyncio.sleep(0.05)

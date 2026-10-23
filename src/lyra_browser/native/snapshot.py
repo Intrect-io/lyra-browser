@@ -16,8 +16,9 @@ session), so the reader does not change:
 - ``box`` is the element's content box in its own frame's viewport (CSS pixels), as
   Playwright gives it; ``compact_snapshot`` adds the frame offsets itself.
 - A ref goes to every rendered node with a non-empty box, ``e<n>`` in the top frame and
-  ``f<k>e<n>`` in the k-th frame met. Refs belong to the latest snapshot: taking one
-  replaces the page's ref table, which ``aria-ref=`` selectors resolve against.
+  ``f<k>e<n>`` in the k-th frame met. The same element keeps its ref across snapshots of
+  one document, as Playwright's do (a region read hands out the refs the whole page did).
+  Only the latest snapshot's refs resolve: taking one replaces the page's ref table.
 
 Measured in the phase-0 spike: 324 of 324 listed elements matched Playwright's (role,
 name, states, href) on a page with forms, a same-site and a cross-site iframe, an open
@@ -83,7 +84,6 @@ class _Builder:
         self._refs = refs
         self._boxes = boxes
         self._depth = depth
-        self._frames_seen = 0
         self.table: dict[str, tuple[str, int]] = {}
 
     async def frame(
@@ -137,7 +137,6 @@ class _Builder:
         href_of = {id(n): h for n, h in zip(links, hrefs, strict=True)}
 
         lines: list[str] = []
-        counter = 0
         for node, role, depth in printed:
             name = (node.get("name") or {}).get("value", "") or ""
             if role == "iframe":
@@ -147,8 +146,7 @@ class _Builder:
             backend = node.get("backendDOMNodeId")
             if box is not None:
                 if self._refs:
-                    counter += 1
-                    ref = f"{prefix}e{counter}"
+                    ref = page._ref_for(frame.id, backend, prefix)
                     attrs.append(f"ref={ref}")
                     self.table[ref] = (frame.id, backend)
                 if self._boxes:
@@ -174,8 +172,7 @@ class _Builder:
         child_id = node.get("frameId")
         if not child_id:
             return []
-        self._frames_seen += 1
-        return await self.frame(page._frame(child_id), None, f"f{self._frames_seen}", indent)
+        return await self.frame(page._frame(child_id), None, page._frame_prefix(child_id), indent)
 
     async def _href(self, frame: FrameRef, backend: int) -> str | None:
         """A link's ``href`` as written, which is what Playwright prints (Chrome's tree has

@@ -35,6 +35,7 @@ from verify_browser_e2e import build_tools, expect, free_port  # noqa: E402
 
 from lyra_browser.origin import parse_origin  # noqa: E402
 from lyra_browser.permission import Capability  # noqa: E402
+from lyra_browser.tools.forms import _main_world  # noqa: E402
 
 # The opener keeps its state in the page, so a reload would lose it: that is what
 # "the opener comes back intact" is checked against.
@@ -226,7 +227,9 @@ async def run_mode(base: str, alt_base: str, *, headless: bool) -> None:
         ctx.session._context.on("page", lambda p: opened_pages.append(p))
 
         async def messages():
-            return await opener.evaluate("window.__state.messages")
+            # The page's own global: the main world, which patchright and the native
+            # driver do not evaluate in by default.
+            return await opener.evaluate("window.__state.messages", **_main_world(opener))
 
         listed = await tools["tabs"]()
         expect(
@@ -266,7 +269,7 @@ async def run_mode(base: str, alt_base: str, *, headless: bool) -> None:
             "get_url reports the opener after the popup closed",
             seen,
         )
-        state = await opener.evaluate("window.__state")
+        state = await opener.evaluate("window.__state", **_main_world(opener))
         expect(
             state == {"n": 42, "messages": ["oauth-done"]},
             "the opener's script state survived the popup",

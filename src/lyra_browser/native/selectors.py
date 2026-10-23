@@ -182,6 +182,9 @@ def parse(selector: str) -> list[Part]:
     for chunk in _split(selector):
         if not chunk:
             raise Error(f'Error while parsing selector "{selector}": empty part')
+        if chunk == "internal:control=enter-frame":
+            steps.append(Part("enter-frame"))
+            continue
         prefixed = _ENGINE_PREFIX.match(chunk)
         if prefixed:
             engine, body = prefixed.group(1).lower(), prefixed.group(2)
