@@ -58,11 +58,13 @@ _PROFILE_LOCK_NAME = "profile.lock"
 _CDP_DROPPED_DEFAULTS = ("--enable-unsafe-swiftshader",)
 
 
-# Import order per driver preference. Both packages expose the same API.
+# Import order per driver preference. All three expose the same API; "native" is
+# lyra's own (lyra_browser.native) and is only ever taken when asked for by name.
 _DRIVER_ORDER = {
     "auto": ("patchright", "playwright"),
     "patchright": ("patchright",),
     "playwright": ("playwright",),
+    "native": ("native",),
 }
 
 
@@ -81,6 +83,10 @@ def load_driver(preference: str = "auto") -> tuple[str, object]:
     order = _DRIVER_ORDER.get(preference) or _DRIVER_ORDER["auto"]
     missing: list[str] = []
     for name in order:
+        if name == "native":
+            from .native import async_native
+
+            return name, async_native
         try:
             module = importlib.import_module(f"{name}.async_api")
         except ImportError:
@@ -172,8 +178,12 @@ def launch_kwargs(
       running binary (see ``UserAgentCache``), so the version, the brands and
       the platform in UA-CH stay the browser's own.
 
-    Deliberately unchanged: ``--enable-automation`` (its infobar is how a person
-    at the shared window is told what is happening) and the service-worker block.
+    Deliberately unchanged: the service-worker block. (Playwright 1.64 no longer
+    passes ``--enable-automation``, measured from the launched command line, so no
+    automation infobar appears; the native driver matches it.)
+
+    The native driver also gets ``chromium_sandbox=False`` only when ``sandbox`` is off:
+    it keeps Chrome's sandbox on by default, where Playwright passes ``--no-sandbox``.
 
     ``guard_backend="cdp"`` launches differently on purpose. Chrome also
     gets ``--remote-debugging-port=0``, the second DevTools connection that
@@ -210,6 +220,8 @@ def launch_kwargs(
         kwargs["ignore_default_args"] = list(_CDP_DROPPED_DEFAULTS)
     if channel:
         kwargs["channel"] = channel
+    if config.driver == "native" and not config.sandbox:
+        kwargs["chromium_sandbox"] = False
     if config.proxy:
         kwargs["proxy"] = {"server": config.proxy}
     return kwargs
@@ -672,8 +684,12 @@ class BrowserSession:
         sidecar: CdpGuard = CdpGuard(
             self.guard, on_lost=lambda reason: self._on_guard_lost(sidecar, reason)
         )
+        # The native driver read the endpoint file itself (Chrome writes it once, and
+        # it is deleted on read); a Playwright launch leaves the sidecar to read it.
+        endpoint = getattr(self._context, "debugging_endpoint", None)
+        handed = {"endpoint": endpoint} if isinstance(endpoint, tuple) else {}
         try:
-            await sidecar.start(self._profile_dir)
+            await sidecar.start(self._profile_dir, **handed)
         except BaseException as exc:
             # The window is open and nothing is guarding it. Closing it is the only
             # answer that is not "carry on unguarded".

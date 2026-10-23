@@ -232,10 +232,10 @@ _NOT_ACTIONABLE: tuple[tuple[str, str], ...] = (
     ),
 )
 
-# Packages whose exception classes count as "the driver said so". Matched by
-# name because importing either would defeat the lazy load, and patchright
-# defines the same classes in its own namespace.
-_DRIVER_PACKAGES = frozenset({"playwright", "patchright"})
+# Modules whose exception classes count as "the driver said so". Matched by
+# name because importing one would defeat the lazy load, and patchright and the
+# native driver define the same classes in their own namespaces.
+_DRIVER_MODULES = ("playwright.", "patchright.", "lyra_browser.native.")
 
 
 def _first_line(exc: BaseException) -> str:
@@ -278,7 +278,7 @@ def describe_failure(
 
     timed_out = "TimeoutError" in names
     if not timed_out and not any(
-        cls.__module__.partition(".")[0] in _DRIVER_PACKAGES for cls in lineage
+        f"{cls.__module__}.".startswith(_DRIVER_MODULES) for cls in lineage
     ):
         return None
 
