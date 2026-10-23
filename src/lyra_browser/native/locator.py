@@ -142,14 +142,14 @@ class Locator:
             owners = await self._run(frame, [*parse(frame_selector), Part("nth", "0")], group)
             if not owners:
                 return []
-            node = (
-                await page._send_on(frame.session, "DOM.describeNode", {"objectId": owners[0]})
-            )["node"]
-            child = node.get("frameId")
-            if not child or node.get("nodeName", "").upper() not in ("IFRAME", "FRAME"):
-                raise Error(f"Selector {describe(frame_selector)} does not match an <iframe>")
-            frame = page._frame(child)
-        steps = parse(self._selector)
+            frame = await self._enter(frame, owners[0], frame_selector)
+        segments: list[list[Part]] = [[]]
+        for step in parse(self._selector):
+            if step.engine == "enter-frame":
+                segments.append([])
+            else:
+                segments[-1].append(step)
+        steps = segments[0]
         start: list[str] | None = None
         if steps and steps[0].engine == "aria-ref":
             if self._frames:
@@ -174,9 +174,32 @@ class Locator:
                     return []
                 raise
             start, steps = [resolved["object"]["objectId"]], steps[1:]
-        elif any(step.engine == "aria-ref" for step in steps):
+        misplaced = [
+            step
+            for i, seg in enumerate(segments)
+            for j, step in enumerate(seg)
+            if step.engine == "aria-ref" and (i, j) != (0, 0)
+        ]
+        if misplaced:
             raise Error(f"aria-ref has to start the selector: {self._selector}")
+        # ``internal:control=enter-frame``: what matched so far is an <iframe>, the rest
+        # of the selector runs inside its document.
+        for later in segments[1:]:
+            owners = await self._run(frame, [*steps, Part("nth", "0")], group, start)
+            if not owners:
+                return []
+            frame = await self._enter(frame, owners[0], self._selector)
+            steps, start = later, None
         return [_El(frame, oid) for oid in await self._run(frame, steps, group, start)]
+
+    async def _enter(self, frame: FrameRef, owner: str, selector: str) -> FrameRef:
+        """The frame whose document the <iframe> ``owner`` shows."""
+        page = self._page
+        node = (await page._send_on(frame.session, "DOM.describeNode", {"objectId": owner}))["node"]
+        child = node.get("frameId")
+        if not child or node.get("nodeName", "").upper() not in ("IFRAME", "FRAME"):
+            raise Error(f"Selector {describe(selector)} does not match an <iframe>")
+        return page._frame(child)
 
     async def _run(
         self, frame: FrameRef, steps: list[Part], group: str, start: list[str] | None = None
@@ -346,7 +369,7 @@ class Locator:
         """Resolve and run ``attempt(element, log)`` until it is not ``RETRY``."""
         page = self._page
         loop = asyncio.get_running_loop()
-        timeout_ms = DEFAULT_TIMEOUT_MS if timeout is None else float(timeout)
+        timeout_ms = page._default_timeout() if timeout is None else float(timeout)
         deadline = loop.time() + timeout_ms / 1000 if timeout_ms > 0 else float("inf")
         log: list[str] = [f"waiting for {describe(self._selector)}"]
         for round_no in itertools.count():
@@ -448,12 +471,19 @@ class Locator:
         return await self._attempts("Locator.is_enabled", timeout, attempt)
 
     async def click(self, *, timeout: float | None = None, **_ignored: Any) -> None:
+        page = self._page
+        timeout_ms = page._default_timeout() if timeout is None else float(timeout)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_ms / 1000 if timeout_ms > 0 else float("inf")
+
         async def attempt(element: _El, log: list[str]) -> Any:
             point = await self._pointer(element, log, "click", enabled=True)
             if point is RETRY:
                 return RETRY
-            await self._page.mouse.click(*point)
+            before = page._nav_marks()
+            await page.mouse.click(*point)
             _note(log, "  - click action done")
+            await page._settle_scheduled(before, deadline, "Locator.click", log, timeout_ms)
             return None
 
         await self._attempts("Locator.click", timeout, attempt)
@@ -490,9 +520,18 @@ class Locator:
         await self._attempts(api, timeout, attempt)
 
     async def press(self, key: str, *, timeout: float | None = None, **_ignored: Any) -> None:
+        page = self._page
+        timeout_ms = page._default_timeout() if timeout is None else float(timeout)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_ms / 1000 if timeout_ms > 0 else float("inf")
+
         async def attempt(element: _El, log: list[str]) -> Any:
             await self._call(element, FOCUS_JS)
-            await self._page.keyboard.press(key)
+            before = page._nav_marks()
+            await page.keyboard.press(key)
+            _note(log, "  - press action done")
+            # Enter in a form starts a navigation, waited on as a click's is.
+            await page._settle_scheduled(before, deadline, "Locator.press", log, timeout_ms)
             return None
 
         await self._attempts("Locator.press", timeout, attempt)

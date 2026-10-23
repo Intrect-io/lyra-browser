@@ -796,18 +796,23 @@ What `native` does differently, on purpose:
   1.64's launch. It keeps a shared profile's cookies readable across drivers and keeps
   the back/forward cache off, which the guard relies on.
 
-Status: opt-in, not yet at parity. Selectors are css (open shadow roots pierced),
-`text=`, `role=…[name=…]` (from Chrome's accessibility tree), `xpath=`, `id=`,
-`data-testid=`, `nth=`, `:visible` and `:has-text()`; any other engine is refused by name.
-`read_page(mode="tree")` matched Playwright's on 75 of 75 elements in the same in-view
-order, and its refs reach into same-site and cross-site iframes
-(`python scripts/verify_native_parity_e2e.py`). The repo's own gates run on it with
-`LYRA_BROWSER_DRIVER=native python scripts/verify_<gate>_e2e.py` (or `--driver native`
-where a gate has that flag). On 2026-10-23 they found gaps the parity check does not
-cover: Playwright calls the gates make directly (`page.content`, `page.input_value`,
-`context.set_default_timeout`), the `internal:control=enter-frame` selector, a key press
-after some flows, a navigation away from a `beforeunload` page, a download a popup starts,
-and an unapproved popup's tab. Until those gates pass, keep the default driver.
+Status: opt-in. Selectors are css (open shadow roots pierced), `text=`,
+`role=…[name=…]` (from Chrome's accessibility tree), `xpath=`, `id=`, `data-testid=`,
+`nth=`, `:visible`, `:has-text()` and `internal:control=enter-frame`; any other engine is
+refused by name. `read_page(mode="tree")` matched Playwright's on 75 of 75 elements in the
+same in-view order, and its refs reach into same-site and cross-site iframes
+(`python scripts/verify_native_parity_e2e.py`).
+
+The repo's own gates run on it with `LYRA_BROWSER_DRIVER=native python
+scripts/verify_<gate>_e2e.py`, or with `--driver native` where a gate has that flag.
+Measured 2026-10-23 on macOS with Chrome 155: 11 of 13 gates pass in full (1,855 checks),
+including all 35 guard scenarios of `verify_cdp_guard_e2e.py`. `verify_tabs_e2e.py` stops
+at the same headful-relaunch check the playwright driver stops at on that machine. The
+rest of `verify_cdp_guard_e2e.py` reads `/proc` and runs on Linux only.
+
+A page's own globals are not visible to `page.evaluate` on native by default, because it
+evaluates in an isolated world as patchright does. Pass `world="main"` for them
+(`tools/forms._main_world` picks the right keyword for each driver).
 
 
 ## Configuration (env)

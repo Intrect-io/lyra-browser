@@ -173,19 +173,21 @@ STATE_JS = (
 }"""
 )
 
-# Whether the element's box stays put across two animation frames. Resolves false if
-# the frames do not come within ``budget`` ms (a background tab may not paint).
+# Whether the element's box stays put across two animation frames. A frame that never
+# paints (a sandboxed ad frame, a background tab) gets no animation frames at all; there
+# the box is compared once more when ``budget`` ms are up instead of failing outright.
 STABLE_JS = r"""function (budget) {
   const e = this;
+  const same = (a, b) =>
+    a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+  const first = e.getBoundingClientRect();
   return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve(false), budget);
+    let done = false;
+    const finish = (value) => { if (!done) { done = true; resolve(value); } };
+    setTimeout(() => finish(same(first, e.getBoundingClientRect())), budget);
     requestAnimationFrame(() => {
       const a = e.getBoundingClientRect();
-      requestAnimationFrame(() => {
-        const b = e.getBoundingClientRect();
-        clearTimeout(timer);
-        resolve(a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height);
-      });
+      requestAnimationFrame(() => finish(same(a, e.getBoundingClientRect())));
     });
   });
 }"""
