@@ -1,7 +1,7 @@
 {
   "name": "lyra-browser",
   "displayName": "lyra browser",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A persistent, logged-in Chromium that Claude drives and you can watch and take over. Navigation, form sending, uploads, downloads and publishing each ask you first through a dialog; a guard layer enforces the answer against every request, whatever caused it.",
   "author": {
     "name": "Intrect",
@@ -27,6 +27,12 @@
         "autonomous"
       ],
       "default": "elicit"
+    },
+    "follow_bypass": {
+      "type": "boolean",
+      "title": "Follow bypass mode",
+      "description": "When Claude Code runs in bypassPermissions mode (--dangerously-skip-permissions), lyra stops asking too: navigation, form sends, uploads, downloads and publishing go ahead without a dialog, audited as consent_channel=bypass. Denied sites, file: and data: URLs and a takeover still win. The mode reaches lyra through the plugin's own hook, never from the model.",
+      "default": true
     },
     "trusted_origins": {
       "type": "string",
@@ -77,7 +83,8 @@
         "LYRA_BROWSER_DENIED_ORIGINS": "${user_config.denied_origins}",
         "LYRA_BROWSER_CONSENT_TIMEOUT": "${user_config.consent_timeout}",
         "LYRA_BROWSER_GUARD": "${user_config.guard}",
-        "LYRA_BROWSER_HEADLESS": "${user_config.headless}"
+        "LYRA_BROWSER_HEADLESS": "${user_config.headless}",
+        "LYRA_BROWSER_FOLLOW_BYPASS": "${user_config.follow_bypass}"
       },
       "timeout": 900000
     }

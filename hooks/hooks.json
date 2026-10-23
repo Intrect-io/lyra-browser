@@ -1,5 +1,5 @@
 {
-  "description": "Builds the plugin's Python environment under ${CLAUDE_PLUGIN_DATA} before the MCP server needs it. Idempotent: a matching stamp returns at once.",
+  "description": "SessionStart builds the plugin's Python environment under ${CLAUDE_PLUGIN_DATA} before the MCP server needs it (idempotent: a matching stamp returns at once). PreToolUse carries Claude Code's bypassPermissions mode to lyra's consent layer, and refuses a call whose input forges it.",
   "hooks": {
     "SessionStart": [
       {
@@ -8,6 +8,18 @@
             "type": "command",
             "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/claude-plugin/bootstrap.sh",
             "timeout": 900
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^mcp__plugin_lyra-browser_lyra__.*$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/claude-plugin/consent-hook.sh",
+            "timeout": 30
           }
         ]
       }

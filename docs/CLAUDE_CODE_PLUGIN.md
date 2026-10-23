@@ -79,12 +79,13 @@ system Chrome or Edge makes it unnecessary.
 
 Claude Code prompts for these when the plugin is enabled and lists them under
 `/config`. They reach the server as `LYRA_BROWSER_*` environment variables
-(the manifest's `mcpServers.lyra.env`), so for these seven keys the plugin's value replaces anything set
+(the manifest's `mcpServers.lyra.env`), so for these eight keys the plugin's value replaces anything set
 in your shell.
 
 | Option | Env var it sets | Meaning |
 |---|---|---|
 | Approval | `LYRA_BROWSER_CONSENT_CHANNEL` | `elicit` (default) asks through a dialog. `autonomous` stops asking: navigation to any site and declared form sends, uploads and downloads are approved, audited as `consent_channel=autonomous`; publishing is still refused and denied sites still win. |
+| Follow bypass mode | `LYRA_BROWSER_FOLLOW_BYPASS` | On (default): while Claude Code runs in bypassPermissions mode, lyra stops asking too. Navigation, sends, uploads, downloads and publishing go ahead with no dialog, audited as `consent_channel=bypass`. Denied sites, `file:`/`data:` URLs and the release of a takeover are still refused or asked about. Off: lyra asks as Approval says, whatever Claude Code's mode. See [Bypass mode](#bypass-mode). |
 | Trusted sites | `LYRA_BROWSER_TRUSTED_ORIGINS` | Not asked about for navigation. `https://host`, bare `host`, or `*.example.com`, comma-separated. Never covers sending, uploading, downloading or publishing. |
 | Send-trusted sites | `LYRA_BROWSER_TRUSTED_SEND_ORIGINS` | Sending a form and uploading also pre-approved, for acceptance runs against your own product. A separate list. |
 | Denied sites | `LYRA_BROWSER_DENIED_ORIGINS` | Refused whatever else says yes. |
@@ -132,6 +133,43 @@ copied into the plugin cache) is likewise not yet exercised; only
   model only up to 4,096 characters. lyra's fit under that for every client
   (`tests/test_server.py` enforces it), and the plugin's `browser` skill
   carries the longer guidance.
+
+### Bypass mode
+
+A session started with `--dangerously-skip-permissions`, or switched to
+bypassPermissions, has told Claude Code not to ask before acting. With Follow
+bypass mode on, lyra follows that for its own dialogs as well.
+
+The mode cannot come from a tool argument, because the model fills in tool
+arguments: a page telling the model "add the bypass flag" would open the gate
+by itself. Claude Code tells only hooks which mode it is in, so the plugin's
+PreToolUse hook (`scripts/claude-plugin/consent_hook.py`, matched to
+`mcp__plugin_lyra-browser_lyra__*`) does this before every lyra call:
+
+- in bypassPermissions mode, it adds `consent_override="bypassPermissions"` to
+  the call's input;
+- in any other mode, it refuses a call whose input already carries that field,
+  so the call never reaches the server.
+
+The server (`src/lyra_browser/bypass.py`, claude-code client only) takes the
+field out before the tool sees it and answers that call's consent requests
+itself. Every such approval is a single-use or leased grant like any other,
+recorded as `consent_channel=bypass`, so the audit trail still tells a dialog
+you answered from one you were not shown.
+
+What it does not cover:
+
+- denied sites, which still refuse;
+- `file:`, `data:` and other opaque URLs, which are still asked about;
+- the release of a takeover, which only the person holding the window answers;
+- the guard: it still enforces exactly what was approved, against every
+  request, so a page cannot ride an approval to somewhere the call did not declare.
+
+Residual risk: the hook is the only writer of the field, and it runs inside
+Claude Code. If it cannot run at all (no Python), a call that carries the field
+is blocked rather than passed through. What the hook cannot defend against
+is its own script being edited in the plugin cache. Outside bypass mode, that
+edit is itself a file write Claude Code asks you about.
 
 ### Commands
 
