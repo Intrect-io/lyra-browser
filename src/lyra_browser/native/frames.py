@@ -70,7 +70,7 @@ class FrameTracker:
     async def watch(self, session: str) -> None:
         """Hear about the OOPIFs whose ``<iframe>`` lives in ``session``'s documents."""
         conn = self._page._context._conn
-        conn.on("Target.attachedToTarget", lambda p, s: self._on_attached(p, s), session=session)
+        conn.on("Target.attachedToTarget", self._on_attached, session=session)
         conn.on("Target.detachedFromTarget", lambda p, _s: self._on_detached(p), session=session)
         await conn.send(
             "Target.setAutoAttach", _IFRAME_ATTACH, session=session, timeout=SETUP_TIMEOUT_S
