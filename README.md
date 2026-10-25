@@ -35,8 +35,9 @@ agent loop ──(MCP: stdio/http)──> lyra-browser server ──> Playwright
 
 - **Standalone MCP server** — registered in the MCP client's configuration; the client
   needs no code change.
-- **Python + Playwright** — pins are `fastmcp>=3.2` and `playwright>=1.59`. Element refs
-  (`aria_snapshot(mode="ai")`) need 1.59; see [Addressing an element](#addressing-an-element-aria-ref).
+- **Python, no browser download** — the only required pin is `fastmcp>=3.2`. The default
+  driver talks to the Chrome or Edge already installed; Playwright is an extra
+  (`lyra-browser[playwright]`) for the drivers that use it.
 - **Dedicated headful window** — `launch_persistent_context(headless=False)` with a
   persistent profile, so logins survive across sessions. One server at a time holds
   that profile (an `flock` on `<data_dir>/profile.lock`, taken when the browser opens,
@@ -45,7 +46,7 @@ agent loop ──(MCP: stdio/http)──> lyra-browser server ──> Playwright
   `open_browser` says so (`profile: "instance"`, "no saved logins in this instance").
 - **No setup tax** — reuses the user's **installed Chrome/Edge** by default
   (`channel="chrome"` → `"msedge"` → bundled Chromium), so `playwright install` is not
-  needed when either is present. If no browser is found, tools return a
+  needed when either is present — and neither is Playwright itself. If no browser is found, tools return a
   `browser_unavailable` envelope that the client can turn into an install prompt.
 - **Full preset** — human-in-the-loop (highlight, ask-the-user, approval gate),
   takeover/handoff, bot-check detection, audit trail, CI + lint + pre-commit.
@@ -164,11 +165,11 @@ stale ref answers `not_found` (or `hidden` for an element that is gone but still
 counted) with a hint to read the tree again; refs get no waiting window, because
 they cannot appear later.
 
-**Requires `playwright>=1.59`.** Refs come from `aria_snapshot(mode="ai")`, which
-1.59 introduced; `pyproject.toml` still floors at 1.58 so that existing 1.58
-installations keep working. On 1.58 the tree still works but answers `refs: false`
-and its lines carry no ref — address elements with `role=link[name="Pricing"]` or
-`text=` selectors instead.
+**The Playwright drivers need `playwright>=1.59`.** Refs come from
+`aria_snapshot(mode="ai")`, which 1.59 introduced; on 1.58 the tree still works but
+answers `refs: false` and its lines carry no ref — address elements with
+`role=link[name="Pricing"]` or `text=` selectors instead. The default `native` driver
+builds the same tree from Chrome's accessibility tree and has no such floor.
 
 ### When an action cannot be done: `click` / `type_text`
 
@@ -730,11 +731,15 @@ port is unacceptable. Every `scripts/verify_*_e2e.py` gate runs on either:
 Developers working on this repo:
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev]"                 # dev includes playwright, for the parity gates
 python -m playwright install chromium   # only needed if you have no system Chrome
 lyra-browser                            # serve over stdio (the default, what an MCP client spawns)
 # or: lyra-browser --http --port 8765   # serve over HTTP for dev
 ```
+
+A plain `pip install lyra-browser` installs no Playwright at all: the default driver
+drives the Chrome or Edge already on the machine. Add `[playwright]` only to pin one of
+the Playwright drivers.
 
 An end user needs no pip and no `playwright install` when Chrome or Edge is installed:
 the server drives that browser. If neither is found, the tools answer
@@ -772,13 +777,14 @@ Windows are not measured. `python scripts/verify_npx_e2e.py` reproduces it. See
 
 ## Drivers
 
-lyra drives the browser through one of three drivers, picked with `LYRA_BROWSER_DRIVER`:
+lyra drives the browser through one of three drivers, picked with `LYRA_BROWSER_DRIVER`
+(the default is `auto`):
 
 | Driver | Needs | Notes |
 |---|---|---|
-| `auto` (default) | `patchright` or `playwright` | `patchright` when installed, else `playwright`. |
-| `patchright` / `playwright` | that package | Pins one. |
-| `native` (opt-in) | Chrome, Edge or Chromium, nothing else | lyra's own driver (`lyra_browser.native`): Chrome over raw DevTools on lyra's own WebSocket. No Playwright, no Node, no chromedriver. Measured: the real-browser runs pass with `playwright` and `patchright` blocked from importing, and no Playwright module loads. |
+| `auto` (default) | Chrome, Edge or Chromium; `playwright` only if none | `native` when a browser is installed, else `patchright` when installed, else `playwright`. |
+| `native` | Chrome, Edge or Chromium, nothing else | lyra's own driver (`lyra_browser.native`): the browser over raw DevTools on lyra's own WebSocket. No Playwright, no Node, no chromedriver. A plain `pip install lyra-browser` needs no browser download. |
+| `patchright` / `playwright` | that package (`pip install "lyra-browser[playwright]"`) | Pins one. |
 
 What `native` does differently, on purpose:
 
@@ -796,7 +802,7 @@ What `native` does differently, on purpose:
   1.64's launch. It keeps a shared profile's cookies readable across drivers and keeps
   the back/forward cache off, which the guard relies on.
 
-Status: opt-in. Selectors are css (open shadow roots pierced), `text=`,
+Status: default. Selectors are css (open shadow roots pierced), `text=`,
 `role=…[name=…]` (from Chrome's accessibility tree), `xpath=`, `id=`, `data-testid=`,
 `nth=`, `:visible`, `:has-text()` and `internal:control=enter-frame`; any other engine is
 refused by name. `read_page(mode="tree")` matched Playwright's on 75 of 75 elements in the
@@ -845,7 +851,7 @@ evaluates in an isolated world as patchright does. Pass `world="main"` for them
 | `LYRA_BROWSER_CHANNEL` | — | Force one channel (`chrome`/`msedge`). Unset = try chrome→msedge→bundled. |
 | `LYRA_BROWSER_ALLOW_BUNDLED` | `true` | Allow bundled-Chromium fallback (only exists after `playwright install`). |
 | `LYRA_BROWSER_AUDIT_STDERR` | `false` | Also write every audit record to stderr as one JSON line. For a host whose disk is ephemeral but whose stderr is collected (the Cloudflare image sets it). |
-| `LYRA_BROWSER_DRIVER` | `auto` | Which driver launches the browser: `auto` takes `patchright` when installed and falls back to `playwright`; either name pins it. `native` (experimental, opt-in) drives an installed Chrome over raw DevTools with no Playwright at all, always with the `cdp` guard, the sandbox on and no `Runtime.enable`. Selectors cover css (open shadow roots pierced), `text=`, `role=…[name=…]`, `xpath=`, `nth=`, `:visible` and `:has-text()`; `read_page(mode="tree")` comes from Chrome's accessibility tree in Playwright's format, and its refs reach into same-site and cross-site iframes. `open_browser` reports the one in use as `driver`. |
+| `LYRA_BROWSER_DRIVER` | `auto` | Which driver launches the browser: `auto` takes `native` when Chrome/Edge/Chromium is installed, else `patchright`, else `playwright`; any name pins it. `native` drives an installed Chrome over raw DevTools with no Playwright at all, always with the `cdp` guard, the sandbox on and no `Runtime.enable`. Selectors cover css (open shadow roots pierced), `text=`, `role=…[name=…]`, `xpath=`, `nth=`, `:visible` and `:has-text()`; `read_page(mode="tree")` comes from Chrome's accessibility tree in Playwright's format, and its refs reach into same-site and cross-site iframes. `open_browser` reports the one in use as `driver`. |
 | `LYRA_BROWSER_SANDBOX` | on | `native` driver only: Chrome's renderer sandbox. Playwright always launches with `--no-sandbox`; the native driver keeps the sandbox unless this is off (a container without user namespaces). |
 | `LYRA_BROWSER_GUARD` | `route` | Where the navigation guard stands: `route` (Playwright's route) or `cdp` (a second DevTools connection: every redirect hop judged, cache on, DataDome lets the browser in, a loopback debugging port, `guard_lost` if the guard fails). See Guard backends. |
 | `LYRA_UAT_CLAUDE_BIN` | `claude` on `PATH` | The Claude Code executable the `claude-code` UAT brain runs. See UAT mode. |
@@ -953,7 +959,9 @@ pre-commit install # enable hooks
 
 Real-browser gates live in `scripts/verify_*_e2e.py`, for
 example `python scripts/verify_browser_e2e.py --headless-only`, or headful under
-`xvfb-run -a`.
+`xvfb-run -a`. `.github/workflows/browser-gates.yml` runs thirteen of them nightly
+(and on demand) for both drivers, on ubuntu with Xvfb; a red nightly run is the signal
+that a driver change regressed something the fake-page unit suite cannot see.
 
 - **CDP guard gate** — `python scripts/verify_cdp_guard_e2e.py` (both modes, `--driver`)
   re-runs the browser, script-redirect and tabs gates on the `cdp` backend, then checks

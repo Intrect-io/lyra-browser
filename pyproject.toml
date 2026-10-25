@@ -19,18 +19,24 @@ classifiers = [
     "Topic :: Internet :: WWW/HTTP :: Browsers",
 ]
 
-# fastmcp tracks the VEGA harness (3.2.0). playwright is held at 1.59, one minor
-# above the harness bundle (1.58.0): element refs (`aria_snapshot(mode="ai")`)
-# arrive in 1.59. Until VEGA bundles 1.59 its runtime degrades to
-# `refs: false`, see docs/VEGA_INTEGRATION.md.
+# fastmcp tracks the VEGA harness (3.2.0). No Playwright here: the default driver
+# (`native`) drives the Chrome or Edge already on the machine over raw DevTools, so a
+# plain install needs no browser download. Playwright is an extra for the drivers that
+# want it, and is what `auto` falls back to on a machine with no browser at all.
 dependencies = [
     "fastmcp>=3.2,<4",
-    "playwright>=1.59,<2",
     "pydantic>=2.6,<3",
 ]
 
 [project.optional-dependencies]
+# The Playwright drivers. Held at 1.59, one minor above what the VEGA harness used to
+# bundle (1.58.0): element refs (`aria_snapshot(mode="ai")`) arrive in 1.59.
+playwright = [
+    "playwright>=1.59,<2",
+]
 dev = [
+    # The real-browser gates run both drivers, so developing means having both.
+    "playwright>=1.59,<2",
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "ruff>=0.6",

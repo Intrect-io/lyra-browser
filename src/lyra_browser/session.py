@@ -25,6 +25,7 @@ import importlib
 import json
 import os
 import shutil
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -59,16 +60,21 @@ _CDP_DROPPED_DEFAULTS = ("--enable-unsafe-swiftshader",)
 
 
 # Import order per driver preference. All three expose the same API; "native" is
-# lyra's own (lyra_browser.native) and is only ever taken when asked for by name.
+# lyra's own (lyra_browser.native) and needs no Playwright at all.
 _DRIVER_ORDER = {
-    "auto": ("patchright", "playwright"),
+    # native first: it drives the Chrome already installed on this machine over raw
+    # DevTools, so it needs neither Playwright nor a downloaded browser. It is skipped
+    # when no Chrome/Edge/Chromium is found, which is the one thing it cannot supply.
+    "auto": ("native", "patchright", "playwright"),
     "patchright": ("patchright",),
     "playwright": ("playwright",),
     "native": ("native",),
 }
 
 
-def load_driver(preference: str = "auto") -> tuple[str, object]:
+def load_driver(
+    preference: str = "auto", channels: Sequence[str | None] | None = None
+) -> tuple[str, object]:
     """The Playwright to launch with: ``(name, async_playwright)``.
 
      patchright is a drop-in fork of Playwright that does not send
@@ -76,16 +82,30 @@ def load_driver(preference: str = "auto") -> tuple[str, object]:
     (raw CDP without it passes; with it alone, 429) — and evaluates in
      an isolated world instead. Everything this module does (persistent context,
      ``context.route``, ``new_cdp_session``) is the same API, so the choice is
-     made here once. ``auto`` prefers patchright when it is installed and falls
-     back to playwright, which is what a VEGA runtime that bundles only
-     playwright gets; a deployment pins one with ``LYRA_BROWSER_DRIVER``.
+     made here once. ``auto`` prefers native (no Playwright at all: it drives the
+    Chrome already installed), then patchright when it is installed, then playwright,
+    which is what a runtime that bundles only Playwright gets. A deployment pins one
+    with ``LYRA_BROWSER_DRIVER``.
+
+    ``channels`` is where native looks for a browser, in order. The default matches
+    what a launch would try, so a machine whose only Chromium is the one Playwright
+    downloaded still gets native.
     """
     order = _DRIVER_ORDER.get(preference) or _DRIVER_ORDER["auto"]
     missing: list[str] = []
     for name in order:
         if name == "native":
             from .native import async_native
+            from .native.errors import Error as NativeError
+            from .native.launcher import find_executable
 
+            # Only a pinned request may answer with a machine that has no browser;
+            # ``auto`` moves on to a Playwright that brings its own Chromium.
+            if preference != "native" and not _any_executable(
+                channels if channels is not None else _NATIVE_CHANNELS, find_executable, NativeError
+            ):
+                missing.append(name)
+                continue
             return name, async_native
         try:
             module = importlib.import_module(f"{name}.async_api")
@@ -94,6 +114,29 @@ def load_driver(preference: str = "auto") -> tuple[str, object]:
             continue
         return name, module.async_playwright
     raise ImportError(f"no browser driver installed (tried {', '.join(missing)})")
+
+
+_NATIVE_CHANNELS: tuple[str | None, ...] = ("chrome", "msedge", None)
+
+
+def _any_executable(
+    channels: Sequence[str | None],
+    find: Callable[[str | None], str],
+    error: type[BaseException],
+) -> bool:
+    """Whether the native driver has a browser to launch here.
+
+    ``None`` in ``channels`` means Playwright's bundled Chromium, which native can
+    drive too when it happens to be downloaded; an install without it simply finds
+    nothing and ``auto`` moves on to Playwright.
+    """
+    for channel in channels:
+        try:
+            find(channel)
+        except error:
+            continue
+        return True
+    return False
 
 
 def _fixed_user_agent(real: str) -> str | None:
@@ -529,7 +572,9 @@ class BrowserSession:
 
     async def _start_playwright(self) -> Playwright:
         """The one place a driver is imported, so tests can stand in for it."""
-        name, async_playwright = load_driver(self._config.driver)
+        name, async_playwright = load_driver(
+            self._config.driver, channels=self._config.browser_candidates()
+        )
         self._active_driver = name
         return await async_playwright().start()
 

@@ -479,9 +479,9 @@ class Config:
     enforcement_mode: str = "enforce"
     # Which driver launches the browser. "patchright" is a drop-in fork of Playwright
     # that does not send Runtime.enable — the one CDP call Kasada refuses on — and
-    # "auto" takes it when installed. "native" needs no Playwright at all: Chrome over
-    # raw DevTools (lyra_browser.native), opt-in until it covers every tool, and always
-    # with the cdp guard. See session.load_driver.
+    # "auto" takes it when installed. "native" needs no Playwright at all — Chrome over
+    # raw DevTools (lyra_browser.native) — and is what `auto` takes when a browser is
+    # installed, always with the cdp guard. See session.load_driver.
     driver: str = "auto"
     # Where the navigation guard sits. "route" is Playwright's context.route: it sees
     # the first request of a redirect chain only, and Playwright's cache-disable that

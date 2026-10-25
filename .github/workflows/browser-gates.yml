@@ -1,0 +1,100 @@
+name: Browser gates
+
+# The real-browser gates are not PR gates: they launch a Chrome and talk to the
+# loopback fixture sites, which takes minutes. They run nightly and on demand, and
+# a red run is the signal that a driver change regressed something the unit suite
+# (which runs on fakes) cannot see. Both drivers run in the same job so a
+# comparison is always one page apart.
+on:
+  workflow_dispatch:
+    inputs:
+      driver:
+        description: Driver to run
+        type: choice
+        options: [native, playwright, both]
+        default: both
+  schedule:
+    - cron: "17 3 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        driver: [native, playwright]
+    env:
+      # The gates build their Config from this; driver choice is the axis under test.
+      LYRA_BROWSER_DRIVER: ${{ matrix.driver }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install patchright  # only so the playwright row can also be run against the fork
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+      - name: Install Xvfb
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+      - name: Which browser
+        run: google-chrome --version || chromium --version
+      # Each gate is its own process: one that hangs or crashes must not take the
+      # others' evidence with it. `set +e` collects every exit code; the final check
+      # fails the job if any gate failed.
+      - name: Run gates (headless)
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.driver == 'both' || github.event.inputs.driver == matrix.driver
+        run: |
+          set +e
+          : > gates.txt
+          for gate in browser click click_refusal redirect_hop scriptredirect dialogs downloads forms motion snapshot tabs wait; do
+            echo "== headless $gate" | tee -a gates.txt
+            timeout 300 python "scripts/verify_${gate}_e2e.py" --headless-only >>"gates.txt" 2>&1
+            echo "exit=$?" | tee -a gates.txt
+          done
+      - name: Run cdp_guard (headless)
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.driver == 'both' || github.event.inputs.driver == matrix.driver
+        run: |
+          set +e
+          echo "== headless cdp_guard" >> gates.txt
+          timeout 900 python scripts/verify_cdp_guard_e2e.py --headless-only --popup-runs 10 >>gates.txt 2>&1
+          echo "exit=$?" | tee -a gates.txt
+      - name: Run gates (headful)
+        if: github.event_name != 'workflow_dispatch' || github.event.inputs.driver == 'both' || github.event.inputs.driver == matrix.driver
+        run: |
+          set +e
+          for gate in browser click_refusal tabs motion; do
+            echo "== headful $gate" | tee -a gates.txt
+            timeout 300 xvfb-run -a -s "-screen 0 1920x1080x24" \
+              python "scripts/verify_${gate}_e2e.py" --headful-only >>gates.txt 2>&1
+            echo "exit=$?" | tee -a gates.txt
+          done
+      - name: Summary
+        if: always()
+        run: |
+          awk '/^== /{name=$0} /^exit=/{printf "%-40s %s\n", name, $0}' gates.txt \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+          if grep -E "^exit=[1-9]" gates.txt; then
+            echo "::error::at least one gate failed"
+            exit 1
+          fi
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gates-${{ matrix.driver }}
+          path: |
+            gates.txt
+            /tmp/lyra-*/audit.jsonl
+          if-no-files-found: ignore
+          retention-days: 14

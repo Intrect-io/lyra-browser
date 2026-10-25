@@ -17,8 +17,10 @@ Hermes' own approval prompt.
 ```
 
 The server runs in its own interpreter; Hermes only spawns it. A browser comes
-from the machine: installed Chrome/Edge first, then Playwright's bundled
-Chromium (`python -m playwright install chromium`) if neither exists.
+from the machine: the default driver drives an installed Chrome or Edge and needs
+no Playwright. If neither is installed, `auto` falls back to Playwright — install it
+and its Chromium then (`pip install "lyra-browser[playwright]"`,
+`python -m playwright install chromium`).
 
 **An editable install runs whatever is checked out.** `pip install -e` points the
 venv at `/path/to/lyra-browser/src`, so every Hermes spawn runs the branch that
