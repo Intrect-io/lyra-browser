@@ -72,10 +72,19 @@ def test_constraints_pin_exactly_what_uv_lock_locked():
             f"{name}: constraints {version}, uv.lock {locked.get(name)}"
         )
     assert "lyra-browser" not in pins, "the project itself is the requirement, not a constraint"
-    # The three direct dependencies of pyproject.toml; the full set is diffed in CI
-    # against `scripts/npm-constraints.sh`.
-    for direct in ("fastmcp", "playwright", "pydantic"):
-        assert direct in pins, f"{direct} is not pinned"
+    # The direct dependencies of pyproject.toml (extras excluded: the shim installs the
+    # base set, and Playwright became an extra when native took over the default). The
+    # full set is diffed in CI against `scripts/npm-constraints.sh`.
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    direct = [
+        re.split(r"[<>=!~\[]", spec, maxsplit=1)[0].strip()
+        for spec in project["project"]["dependencies"]
+    ]
+    assert direct, "pyproject.toml declares no dependencies"
+    for name in direct:
+        assert _normalise(name) in pins, f"{name} is not pinned"
+    # And the shim must not drag a browser engine in for a user who has Chrome anyway.
+    assert "playwright" not in pins
 
 
 def test_package_ships_only_the_shim():
