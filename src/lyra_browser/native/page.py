@@ -76,14 +76,24 @@ class Response:
 
 
 class _Outcome:
-    """What a history navigation (back, reload) turned into, as the frame reports it."""
+    """What a history navigation (back, reload) turned into, as the frame reports it.
+
+    A stop counts only after this navigation has started loading. The document that was
+    there before still reports its own ``frameStoppedLoading`` a moment after its
+    ``load`` event; taken at face value, that late stop settled a ``go_back`` or
+    ``reload`` sent right after a ``goto`` as "stopped" before Chrome had begun it
+    (measured: native failed cdp_guard's back/reload case 2 runs of 3, Playwright 0).
+    """
 
     def __init__(self) -> None:
         self.future: asyncio.Future[tuple[str, str | None]] = (
             asyncio.get_running_loop().create_future()
         )
+        self.started = False
 
     def settle(self, kind: str, value: str | None = None) -> None:
+        if kind == "stopped" and not self.started:
+            return  # the previous document's stop, not ours
         if not self.future.done():
             self.future.set_result((kind, value))
 
@@ -204,6 +214,7 @@ class NativePage:
         self._on("Page.frameAttached", lambda p: self._frames.add(p.get("frameId", "")))
         self._on("Page.frameDetached", self._on_frame_detached)
         self._on("Page.lifecycleEvent", self._on_lifecycle)
+        self._on("Page.frameStartedLoading", self._on_started_loading)
         self._on("Page.frameStoppedLoading", self._on_stopped_loading)
         self._on("Page.frameRequestedNavigation", self._on_requested_navigation)
         self._on("Page.javascriptDialogOpening", self._on_dialog)
@@ -302,6 +313,10 @@ class NativePage:
         else:
             self._lifecycle.setdefault(loader, set()).add(name)
         self._notify()
+
+    def _on_started_loading(self, params: dict) -> None:
+        if params.get("frameId") == self.target_id and self._outcome is not None:
+            self._outcome.started = True
 
     def _on_stopped_loading(self, params: dict) -> None:
         if params.get("frameId") != self.target_id:

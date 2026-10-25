@@ -246,6 +246,14 @@ async def no_browser_left(data_dir: Path, timeout: float = 6.0) -> list[int]:
     while True:
         left = [pid for pid in browsers_of(data_dir) if process_alive(pid)]
         if not left or time.monotonic() >= deadline:
+            if left and not _HAS_PROC:
+                # Off Linux this check is new; say what outlived the wait.
+                for pid in left:
+                    command = " ".join(read_cmdline(pid))
+                    kind = next(
+                        (a for a in command.split() if a.startswith("--type=")), "--type=browser"
+                    )
+                    note(f"left after {timeout:.0f}s: pid {pid} {kind}")
             return left
         await asyncio.sleep(0.1)
 

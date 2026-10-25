@@ -42,6 +42,10 @@ class _Context:
 def _page() -> tuple[NativePage, _Conn]:
     context = _Context()
     page = NativePage(context, "T1", "S1", None, "about:blank")
+    # What _initialize subscribes, without the commands it sends.
+    page._on("Page.frameNavigated", page._on_frame_navigated)
+    page._on("Page.frameStartedLoading", page._on_started_loading)
+    page._on("Page.frameStoppedLoading", page._on_stopped_loading)
     return page, context._conn
 
 
@@ -111,3 +115,33 @@ async def test_expect_download_times_out_and_still_stops_listening():
     with pytest.raises(asyncio.TimeoutError):
         await page.expect_download(timeout=0.05)
     assert "download" not in page._handlers
+
+
+async def test_a_stop_from_the_previous_document_does_not_settle_a_history_navigation():
+    """The document a goto just loaded reports frameStoppedLoading a tick after its load
+    event. A go_back or reload sent in that tick must not read that stop as its own:
+    it was 'stopped' before Chrome began it, and the guard had refused nothing yet."""
+    page, conn = _page()
+    page._outcome = outcome = page_outcome()
+    conn.fire("Page.frameStoppedLoading", {"frameId": "T1"}, "S1")  # the old document's
+    await asyncio.sleep(0)
+    assert not outcome.future.done(), "a stop before this navigation started settled it"
+
+    conn.fire("Page.frameStartedLoading", {"frameId": "T1"}, "S1")
+    conn.fire("Page.frameStoppedLoading", {"frameId": "T1"}, "S1")  # refused: no commit
+    assert await outcome.future == ("stopped", None)
+
+
+async def test_a_commit_settles_a_history_navigation_whether_or_not_a_start_was_seen():
+    page, conn = _page()
+    page._outcome = outcome = page_outcome()
+    conn.fire(
+        "Page.frameNavigated", {"frame": {"id": "T1", "url": "https://a/", "loaderId": "L2"}}, "S1"
+    )
+    assert await outcome.future == ("navigated", "L2")
+
+
+def page_outcome():
+    from lyra_browser.native.page import _Outcome
+
+    return _Outcome()
