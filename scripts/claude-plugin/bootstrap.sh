@@ -12,9 +12,9 @@
 #     and a SessionStart hook's stdout goes into the model's context.
 #   - Everything it does is logged to $CLAUDE_PLUGIN_DATA/bootstrap.log and
 #     summarised on stderr.
-#   - Never runs `playwright install`: that takes minutes, and the server
-#     drives a system Chrome or Edge when one exists. The install-browser skill
-#     does it on request.
+#   - Installs no Playwright and never runs `playwright install`: the server's
+#     default driver drives a system Chrome or Edge with neither. The
+#     install-browser skill adds both on request, for a machine with no browser.
 #   - Serialised by a lock directory: two sessions starting at once build
 #     once; the second waits, then finds the stamp.
 set -euo pipefail

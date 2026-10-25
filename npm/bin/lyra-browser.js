@@ -52,12 +52,19 @@ function findUvx(env, platform, home) {
 // `install-browser [args]` runs Playwright's installer from the same pinned
 // environment. A bare `uvx --from lyra-browser playwright install` would resolve
 // the newest Playwright, whose Chromium revision is not the one the server looks for.
+// It asks for the [playwright] extra: Playwright is not a dependency of the server
+// any more (the default driver drives the installed Chrome), so without the extra
+// there would be nothing to install from.
 function buildArgs(env, userArgs) {
-  const spec = env.LYRA_BROWSER_PY_SPEC || `lyra-browser==${pkg.version}`;
   const installer = userArgs[0] === 'install-browser';
-  // uv warns that `playwright` comes from a dependency of lyra-browser, not from
+  // The extra goes after the name and before the version (PEP 508). A spec the user
+  // handed in (a wheel path, a git URL) is passed through as given: it names its own.
+  const requirement =
+    env.LYRA_BROWSER_PY_SPEC ||
+    `lyra-browser${installer ? '[playwright]' : ''}==${pkg.version}`;
+  // uv warns that `playwright` comes from an extra of lyra-browser, not from
   // lyra-browser itself. That is the point here, and -q drops only uv's own notices.
-  const args = installer ? ['--quiet', '--from', spec] : ['--from', spec];
+  const args = [installer ? '--quiet' : null, '--from', requirement].filter(Boolean);
   const constraints =
     env.LYRA_BROWSER_PY_CONSTRAINTS === undefined
       ? path.join(__dirname, '..', 'constraints.txt')

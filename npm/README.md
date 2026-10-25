@@ -46,9 +46,10 @@ Arguments after the package name go to the server, so
   npx -y @intrect/lyra-browser install-browser
   ```
 
-  downloads Playwright's own Chromium builds into Playwright's browser cache, using the
-  same pinned Playwright the server runs with (a newer one would fetch a different
-  Chromium revision). Extra arguments go to Playwright's installer, e.g.
+  adds the server's `[playwright]` extra and downloads Playwright's own Chromium builds
+  into Playwright's browser cache, using the pinned Playwright release (a newer one
+  would fetch a different Chromium revision). With Chrome or Edge installed none of
+  this is needed: the server drives that browser with no Playwright at all. Extra arguments go to Playwright's installer, e.g.
   `install-browser --with-deps`, which needs root on Linux.
 
 ## Start-up time
