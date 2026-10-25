@@ -68,7 +68,6 @@ import asyncio
 import html
 import inspect
 import json
-import os
 import sys
 import tempfile
 import threading
@@ -1231,7 +1230,7 @@ async def run_mode(
     *,
     headless: bool,
     driver: str,
-    guarantee: str,
+    guarantee: str | None,
     relay: bool,
     hop_delay: float,
 ) -> None:
@@ -1263,6 +1262,12 @@ async def run_mode(
         )
         page_ = await ctx.session.page()
         page_.context.set_default_timeout(DRIVER_TIMEOUT_MS)
+        # Which guarantee the rows can meet follows the guard that actually ran, not
+        # what was configured: `auto` can land on native, which always uses the cdp
+        # guard. Reading only LYRA_BROWSER_GUARD called that run "after" and failed
+        # ten cases that the cdp backend passes.
+        if guarantee is None:
+            guarantee = "before" if ctx.session.effective_guard_backend() == "cdp" else "after"
         gate = Gate(ctx, tools, page_, servers, guarantee=guarantee, hop_delay=hop_delay)
         await gate.run()
     finally:
@@ -1311,7 +1316,8 @@ def main() -> int:
         default=None,
         help="after: a refused hop reaches its destination at most once (what the route "
         "backend promises); before: it reaches nothing (what an interceptor that sees hops "
-        "before they leave must meet, the cdp backend). Default: follows LYRA_BROWSER_GUARD",
+        "before they leave must meet, the cdp backend). Default: the guard the session "
+        "actually ran",
     )
     parser.add_argument(
         "--hop-delay",
@@ -1327,8 +1333,6 @@ def main() -> int:
         "'before' assertions can be met; needs --guarantee before",
     )
     args = parser.parse_args()
-    if args.guarantee is None:
-        args.guarantee = "before" if os.environ.get("LYRA_BROWSER_GUARD") == "cdp" else "after"
     if args.relay and args.guarantee != "before":
         parser.error("--relay refuses before it sends, so it only fits --guarantee before")
     failed = asyncio.run(async_main(args))
