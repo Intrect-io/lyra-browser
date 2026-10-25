@@ -6,6 +6,11 @@
 #
 # The flags live here, once, so the file and the check cannot disagree. Markers
 # stay in (`; python_full_version < '3.12'`), so one file serves every platform.
+#
+# --extra playwright: Playwright is not a dependency of the server, but the
+# launcher's `install-browser` installs it, and it must be the release this lock
+# was tested with (another one fetches a different Chromium revision). A constraint
+# never installs anything by itself, so the server's own start is unchanged.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
-exec uv export --frozen --no-dev --no-emit-project --no-hashes --no-header --no-annotate
+exec uv export --frozen --no-dev --extra playwright --no-emit-project --no-hashes --no-header --no-annotate

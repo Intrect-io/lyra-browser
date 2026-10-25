@@ -70,13 +70,13 @@ test('passes the caller\'s arguments to the server unchanged', { skip: !POSIX },
   assert.deepEqual(recorded(sb).slice(4), ['lyra-browser', '--http', '--port', '8765', '--client', 'generic']);
 });
 
-test('install-browser runs the installer from the same pinned environment', { skip: !POSIX }, () => {
+test('install-browser runs the installer from the same pinned environment, with the playwright extra', { skip: !POSIX }, () => {
   const sb = sandbox();
   run(sb, ['install-browser', '--with-deps']);
   assert.deepEqual(recorded(sb), [
     '--quiet',
     '--from',
-    `lyra-browser==${VERSION}`,
+    `lyra-browser[playwright]==${VERSION}`,
     '--constraints',
     CONSTRAINTS,
     'playwright',

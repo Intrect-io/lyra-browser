@@ -83,8 +83,9 @@ def test_constraints_pin_exactly_what_uv_lock_locked():
     assert direct, "pyproject.toml declares no dependencies"
     for name in direct:
         assert _normalise(name) in pins, f"{name} is not pinned"
-    # And the shim must not drag a browser engine in for a user who has Chrome anyway.
-    assert "playwright" not in pins
+    # Playwright is pinned for `install-browser` (it installs the [playwright] extra
+    # from the same lock), though the server itself does not depend on it.
+    assert "playwright" in pins
 
 
 def test_package_ships_only_the_shim():
