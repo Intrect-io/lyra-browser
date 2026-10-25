@@ -371,3 +371,39 @@ def test_the_proxy_is_read_from_the_environment(monkeypatch):
     assert Config.from_env().proxy == "socks5://10.0.0.2:1080"
     monkeypatch.setenv("LYRA_BROWSER_PROXY", "")
     assert Config.from_env().proxy is None
+
+
+# --------------------------------------------------------------------------
+# auto landing on native: the launch is the native one
+# --------------------------------------------------------------------------
+
+
+def test_auto_that_lands_on_native_launches_with_the_cdp_guard(tmp_path):
+    """``auto`` decides at launch; native has no context.route, so the launch must be
+    the cdp one (debugging port on the command line, sidecar guard) — measured: before
+    this, a plain install with Chrome raised "BrowserContext.route is not supported"."""
+    cfg = make_config(tmp_path, headless=True, channel="chrome")
+    assert cfg.driver == "auto" and cfg.guard_backend == "route"
+    session = BrowserSession(cfg)
+    session._active_driver = "native"
+
+    launch = session._launch_config()
+    assert launch.driver == "native" and launch.guard_backend == "cdp"
+    assert "--remote-debugging-port=0" in launch_kwargs(launch, "chrome")["args"]
+    # The shared Config the rest of the server reads still says what was configured.
+    assert cfg.driver == "auto" and cfg.guard_backend == "route"
+
+
+def test_the_launch_copy_keeps_paths_a_caller_set_by_hand(tmp_path):
+    cfg = make_config(tmp_path, headless=True)
+    cfg.capture_dir = tmp_path / "elsewhere"
+    session = BrowserSession(cfg)
+    session._active_driver = "native"
+    assert session._launch_config().capture_dir == tmp_path / "elsewhere"
+
+
+def test_auto_that_lands_on_playwright_keeps_the_configured_guard(tmp_path):
+    cfg = make_config(tmp_path, headless=True)
+    session = BrowserSession(cfg)
+    session._active_driver = "playwright"
+    assert session._launch_config() is cfg
