@@ -26,6 +26,7 @@ import json
 import os
 import shutil
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -578,6 +579,25 @@ class BrowserSession:
         self._active_driver = name
         return await async_playwright().start()
 
+    def _launch_config(self) -> Config:
+        """The configuration this launch runs on: the server's, for the driver it got.
+
+        ``auto`` decides the driver only here, at launch. When it lands on native, the
+        launch must be the native one: no ``context.route`` (so the ``cdp`` guard, which
+        also needs the debugging port on the command line) and the sandbox choice native
+        honours. The shared ``Config`` keeps saying ``auto``; a copy says what ran.
+        """
+        if self._active_driver == "native" and (
+            self._config.driver != "native" or self._config.guard_backend != "cdp"
+        ):
+            copy = replace(self._config, driver="native", guard_backend="cdp")
+            # replace() re-runs __post_init__, which derives these from data_dir again;
+            # a caller that set one by hand (a gate's capture_dir) keeps what it set.
+            for derived in ("profile_dir", "audit_path", "capture_dir", "download_dir"):
+                setattr(copy, derived, getattr(self._config, derived))
+            return copy
+        return self._config
+
     def _claim_profile(self) -> None:
         """Decide, now that a browser is about to open, which profile it gets."""
         if self._profile_lock is None:
@@ -620,9 +640,10 @@ class BrowserSession:
         The cdp backend reads the debugging endpoint Chrome writes into the profile, so a
         file left there by the last run must be gone before this one starts.
         """
-        if self._config.guard_backend == "cdp":
+        config = self._launch_config()
+        if config.guard_backend == "cdp":
             prepare_profile(self._profile_dir)
-        return launch_kwargs(self._config, channel, user_agent, self._profile_dir)
+        return launch_kwargs(config, channel, user_agent, self._profile_dir)
 
     async def _launch_context(self, channel: str | None, user_agent: str | None):
         """``launch_persistent_context`` on the claimed profile.
@@ -712,7 +733,7 @@ class BrowserSession:
         assert self._context is not None
         if self.guard is None:
             return
-        if self._config.guard_backend != "cdp":
+        if self._launch_config().guard_backend != "cdp":
             # context.route, not page.route: page.route never sees a popup's
             # first request, and opening a new tab is the most ordinary way to
             # leave a site.
