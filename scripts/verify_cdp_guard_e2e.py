@@ -497,6 +497,22 @@ def guard_env(backend: str) -> Iterator[None]:
             os.environ["LYRA_BROWSER_GUARD"] = old
 
 
+@contextlib.contextmanager
+def driver_env(driver: str) -> Iterator[None]:
+    """``LYRA_BROWSER_DRIVER`` for the duration, as ``guard_env`` does for the backend:
+    build_tools reads both, and a value left in the environment (CI sets it per job)
+    must not override the driver a rig asked for."""
+    old = os.environ.get("LYRA_BROWSER_DRIVER")
+    os.environ["LYRA_BROWSER_DRIVER"] = driver
+    try:
+        yield
+    finally:
+        if old is None:
+            os.environ.pop("LYRA_BROWSER_DRIVER", None)
+        else:
+            os.environ["LYRA_BROWSER_DRIVER"] = old
+
+
 def _must(condition: bool, message: str) -> None:
     """A precondition of the gate itself, not a result worth a PASS line."""
     if not condition:
@@ -517,12 +533,22 @@ class CheckedBuild:
         self.contexts: list = []
         self.launches = 0
 
+    def driver_for_backend(self) -> str:
+        """The driver this build launches. A ``route`` control needs Playwright:
+        native has no ``context.route`` and always runs the cdp guard, so ``auto``
+        (which now lands on native) and ``native`` would silently make the control
+        a second cdp run."""
+        if self.backend == "route" and self.env.driver in ("auto", "native"):
+            return "playwright"
+        return self.env.driver
+
     async def __call__(self, data_dir: Path, *, headless: bool):
         TEMP_DIRS.append(str(data_dir))
-        with guard_env(self.backend):
+        driver = self.driver_for_backend()
+        with guard_env(self.backend), driver_env(driver):
             ctx, tools = await build_tools(data_dir, headless=headless)
         _must(ctx.config.guard_backend == self.backend, f"backend is not {self.backend}")
-        ctx.config.driver = self.env.driver
+        ctx.config.driver = driver
         self.contexts.append(ctx)
         tools = dict(tools)
         real_open = tools["open_browser"]
@@ -532,8 +558,8 @@ class CheckedBuild:
             if result.get("status") == "ok":
                 sidecar = ctx.session._cdp_guard
                 _must((sidecar is not None) == (self.backend == "cdp"), "wrong guard on session")
-                if self.env.driver != "auto":
-                    _must(result.get("driver") == self.env.driver, f"driver is {result}")
+                if driver != "auto":
+                    _must(result.get("driver") == driver, f"driver is {result}")
                 self.launches += 1
             return result
 
@@ -2158,21 +2184,46 @@ async def loss_window(env: Env, run: int) -> None:
             )
 
 
+def _native_available() -> bool:
+    """Whether ``auto`` will land on native here (a browser native can launch exists)."""
+    from lyra_browser import session
+
+    return session.load_driver("auto")[0] == "native"
+
+
 async def cannot_start(env: Env) -> None:
     """No endpoint to connect to: open_browser says guard_lost and no Chrome is left."""
     from lyra_browser import cdp_guard
 
     async with rig(env, "failclosed-nostart", launch=False) as r:
-        real = cdp_guard.read_endpoint
+        # Where the failure is injected follows how the endpoint reaches the sidecar.
+        # A Playwright launch leaves the sidecar to read DevToolsActivePort itself, so
+        # read_endpoint is the seam. The native driver reads that file at launch and
+        # hands the endpoint over (it is deleted on read): read_endpoint is never
+        # called, so the seam is the sidecar's start. Either way the sidecar cannot
+        # start, which is what this case is about.
+        native = r.ctx.config.driver == "native" or (
+            r.ctx.config.driver == "auto"
+            and r.ctx.session.effective_guard_backend() == "cdp"
+            and _native_available()
+        )
 
         async def missing(*_args, **_kwargs):
             raise cdp_guard.CdpGuardError("no debugging endpoint")
 
-        cdp_guard.read_endpoint = missing
+        if native:
+            real_start = cdp_guard.CdpGuard.start
+            cdp_guard.CdpGuard.start = missing
+        else:
+            real = cdp_guard.read_endpoint
+            cdp_guard.read_endpoint = missing
         try:
             opened = await r.tools["open_browser"]()
         finally:
-            cdp_guard.read_endpoint = real
+            if native:
+                cdp_guard.CdpGuard.start = real_start
+            else:
+                cdp_guard.read_endpoint = real
         expect(opened.get("status") == "guard_lost", "open_browser answers guard_lost", opened)
         left = await no_browser_left(r.data_dir)
         rows = [x for x in r.nav_rows() if x["status"] == "guard_lost"]
@@ -2396,7 +2447,10 @@ def main() -> int:
     group.add_argument("--headless-only", action="store_true")
     group.add_argument("--headful-only", action="store_true")
     parser.add_argument(
-        "--driver", choices=["auto", "playwright", "patchright", "native"], default="auto"
+        "--driver",
+        choices=["auto", "playwright", "patchright", "native"],
+        # LYRA_BROWSER_DRIVER is what every other gate reads; CI sets it per job.
+        default=os.environ.get("LYRA_BROWSER_DRIVER") or "auto",
     )
     parser.add_argument(
         "--popup-runs", type=int, default=10, help="runs of every popup scenario (scenarios)"

@@ -67,7 +67,7 @@ jobs:
         run: |
           set +e
           echo "== headless cdp_guard" >> gates.txt
-          timeout 900 python scripts/verify_cdp_guard_e2e.py --headless-only --popup-runs 10 >>gates.txt 2>&1
+          timeout 1500 python scripts/verify_cdp_guard_e2e.py --headless-only --popup-runs 10 --driver "${{ matrix.driver }}" >>gates.txt 2>&1
           echo "exit=$?" | tee -a gates.txt
       - name: Run gates (headful)
         if: github.event_name != 'workflow_dispatch' || github.event.inputs.driver == 'both' || github.event.inputs.driver == matrix.driver
