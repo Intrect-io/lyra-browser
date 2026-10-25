@@ -49,6 +49,7 @@ from .locator import FrameLocator, Locator
 
 if TYPE_CHECKING:
     from .context import NativeContext
+    from .download import Download
 
 INIT_TIMEOUT_S = 10.0
 DEFAULT_TIMEOUT_MS = 30_000.0
@@ -87,6 +88,9 @@ class _Outcome:
             self.future.set_result((kind, value))
 
 
+_FETCH_TOP_DOCUMENTS = {"patterns": [{"resourceType": "Document", "requestStage": "Request"}]}
+
+
 class NativePage:
     def __init__(
         self, context: NativeContext, target_id: str, session: str, opener_id: str | None, url: str
@@ -108,6 +112,8 @@ class NativePage:
         self._commits: list[tuple[int, str]] = []
         self._lifecycle: dict[str, set[str]] = {}
         self._responses: dict[str, Response] = {}
+        # Set by enable_request_filter: a predicate over paused document requests.
+        self._request_filter: Callable[[dict], bool] | None = None
         self._waiters: list[Callable[[], None]] = []
         self._outcome: _Outcome | None = None
         self._failed_loads: dict[str, str] = {}
@@ -391,9 +397,19 @@ class NativePage:
     # -- events for callers -----------------------------------------------------------
 
     def on(self, event: str, handler: Callable) -> None:
+        """Playwright's ``page.on``; the handler gets the event's payload(s) — e.g.
+        ``"download"`` hands over the ``Download``, ``"console"`` the ``ConsoleMessage``."""
         self._handlers.setdefault(event, []).append(handler)
         if event in RUNTIME_EVENTS and not self._runtime_on:
             self._enable_runtime()
+
+    def off(self, event: str, handler: Callable) -> None:
+        """Playwright's ``page.off``: undo ``on`` for exactly this pair."""
+        handlers = self._handlers.get(event)
+        if handlers and handler in handlers:
+            handlers.remove(handler)
+            if not handlers:
+                del self._handlers[event]
 
     def _enable_runtime(self) -> None:
         """Console and page errors need Runtime.enable: only for a page someone observes."""
@@ -879,6 +895,70 @@ class NativePage:
 
     async def bring_to_front(self) -> None:
         await self._send("Page.bringToFront")
+
+    async def enable_request_filter(self, keep: Callable[[dict], bool]) -> None:
+        """Judge this tab's top-level document requests before they leave.
+
+        ``keep`` gets a ``Fetch.requestPaused`` description (``url``,
+        ``resourceType``, ``request.method``…) and returns whether the request may
+        go. A request it refuses is answered ``204`` — the page stays where it was,
+        rather than landing on ``chrome-error://`` — which is how ``cdp_guard``
+        refuses too. Sub-resource requests and other frames are let through
+        untouched: this is for a caller that needs a different policy from the
+        guard (VEGA's ``web_fetch`` pins one origin), not a navigation guard.
+
+        Called with the page's own session, so it sees this tab and the OOPIFs under
+        it; each is paused with the same predicate.
+        """
+        self._request_filter = keep
+
+        def handle(params: dict, session: str) -> None:
+            request_id = params.get("requestId")
+            if not isinstance(request_id, str):
+                return
+            try:
+                allowed = bool(keep(params))
+            except Exception:  # noqa: BLE001 — a filter that breaks must not open the gate
+                allowed = False
+            if allowed:
+                self._fire_async(session, "Fetch.continueRequest", {"requestId": request_id})
+            else:
+                self._fire_async(
+                    session,
+                    "Fetch.fulfillRequest",
+                    {"requestId": request_id, "responseCode": 204},
+                )
+
+        self._context._conn.on("Fetch.requestPaused", handle, session=self._session)
+        await self._send("Fetch.enable", _FETCH_TOP_DOCUMENTS)
+
+    def _fire_async(self, session: str, method: str, params: dict) -> None:
+        """Send without waiting for the reply: a paused request holds the page."""
+        task = asyncio.ensure_future(self._context._conn.send(method, params, session=session))
+        task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+
+    async def expect_download(self, timeout: float | None = None) -> Download:
+        """``page.expect_download``: the file the next action on this page offers.
+
+        Fires for a download started by a click, a form send or a script — anything the
+        page does after this call. ``timeout`` seconds (default: the page's action
+        timeout) until one arrives.
+        """
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
+
+        def on_event(download: Download) -> None:
+            if not future.done():
+                future.set_result(download)
+
+        self.on("download", on_event)
+        try:
+            return await asyncio.wait_for(
+                future,
+                timeout if timeout is not None else self._default_timeout() / 1000,
+            )
+        finally:
+            self.off("download", on_event)
 
     async def close(self, *, run_before_unload: bool = False, **_ignored: Any) -> None:
         if self._closed:
