@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lyra-browser"
-version = "0.1.3"
+version = "0.2.0"
 description = "lyra: an MCP server that gives an agent a persistent, logged-in Chromium the user can watch and take over, with every site change, form send, upload and download asked first."
 readme = "README.md"
 requires-python = ">=3.11"
