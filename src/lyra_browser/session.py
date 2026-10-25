@@ -579,6 +579,16 @@ class BrowserSession:
         self._active_driver = name
         return await async_playwright().start()
 
+    def effective_guard_backend(self) -> str:
+        """The guard this session runs: ``route`` or ``cdp``.
+
+        ``auto`` decides the driver at launch, so the configured value is not always the
+        one in force (native always takes the cdp guard). Callers that read the guard's
+        behaviour from the session — a gate choosing which promise to assert — want this,
+        not ``config.guard_backend``.
+        """
+        return self._launch_config().guard_backend
+
     def _launch_config(self) -> Config:
         """The configuration this launch runs on: the server's, for the driver it got.
 
