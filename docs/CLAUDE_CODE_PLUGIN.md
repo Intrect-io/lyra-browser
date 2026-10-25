@@ -72,8 +72,9 @@ MCP servers start, so on a machine where the first build takes longer than
 that, the first connection can fail while the build completes; `/mcp` →
 reconnect, or the next session, then finds the environment ready.
 
-`playwright install` is never part of the bootstrap: it takes minutes and a
-system Chrome or Edge makes it unnecessary.
+Neither Playwright nor `playwright install` is part of the bootstrap: the default
+driver uses the Chrome or Edge already on the machine. A machine with neither gets
+`browser_unavailable` from `open_browser`, which says to install Chrome.
 
 ## Options
 

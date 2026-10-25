@@ -313,7 +313,7 @@ async def test_load_driver_hands_back_the_native_driver_by_name_only():
     driver = await starter().start()
     assert hasattr(driver.chromium, "launch_persistent_context")
     await driver.stop()
-    assert session_mod._DRIVER_ORDER["auto"] == ("patchright", "playwright")
+    assert session_mod._DRIVER_ORDER["auto"] == ("native", "patchright", "playwright")
 
 
 async def test_the_guard_uses_a_handed_endpoint_instead_of_reading_the_file(monkeypatch, tmp_path):

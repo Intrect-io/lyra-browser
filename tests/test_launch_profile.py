@@ -276,13 +276,26 @@ def _fake_import(available: set[str]):
     return _import
 
 
+# ``channels=[]`` is "no browser installed here", which is what sends ``auto`` past
+# native. Without it these would depend on whether the machine running them has Chrome.
+
+
+def test_auto_prefers_native_when_a_browser_is_installed(monkeypatch):
+    """No Playwright at all is needed when the machine already has a browser."""
+    from lyra_browser import session
+
+    monkeypatch.setattr(session.importlib, "import_module", _fake_import(set()))
+    name, _starter = session.load_driver("auto", channels=["chrome"])
+    assert name == "native"
+
+
 def test_auto_prefers_patchright_when_installed(monkeypatch):
     from lyra_browser import session
 
     monkeypatch.setattr(
         session.importlib, "import_module", _fake_import({"patchright", "playwright"})
     )
-    name, factory = session.load_driver("auto")
+    name, factory = session.load_driver("auto", channels=[])
     assert name == "patchright" and factory() == "patchright"
 
 
@@ -291,7 +304,15 @@ def test_auto_falls_back_to_playwright(monkeypatch):
     from lyra_browser import session
 
     monkeypatch.setattr(session.importlib, "import_module", _fake_import({"playwright"}))
-    assert session.load_driver("auto")[0] == "playwright"
+    assert session.load_driver("auto", channels=[])[0] == "playwright"
+
+
+def test_auto_with_no_browser_and_no_playwright_names_both(monkeypatch):
+    from lyra_browser import session
+
+    monkeypatch.setattr(session.importlib, "import_module", _fake_import(set()))
+    with pytest.raises(ImportError, match="native, patchright, playwright"):
+        session.load_driver("auto", channels=[])
 
 
 def test_a_pinned_driver_is_not_substituted(monkeypatch):
@@ -303,12 +324,11 @@ def test_a_pinned_driver_is_not_substituted(monkeypatch):
         session.load_driver("patchright")
 
 
-def test_no_driver_at_all_is_an_import_error(monkeypatch):
+def test_a_pinned_native_does_not_look_for_a_browser_first(monkeypatch):
+    """Pinned is an instruction: the launch then answers browser_unavailable itself."""
     from lyra_browser import session
 
-    monkeypatch.setattr(session.importlib, "import_module", _fake_import(set()))
-    with pytest.raises(ImportError, match="patchright, playwright"):
-        session.load_driver("auto")
+    assert session.load_driver("native", channels=[])[0] == "native"
 
 
 def test_driver_env_and_unknown_value(monkeypatch):
@@ -326,7 +346,7 @@ async def test_session_records_which_driver_launched(tmp_path, monkeypatch):
         return pw
 
     monkeypatch.setattr(
-        mod, "load_driver", lambda pref: ("patchright", lambda: SimpleNamespace(start=start))
+        mod, "load_driver", lambda pref, **_kw: ("patchright", lambda: SimpleNamespace(start=start))
     )
     # make_session stood in for _start_playwright; let the real one run here
     monkeypatch.delattr(session, "_start_playwright", raising=False)
