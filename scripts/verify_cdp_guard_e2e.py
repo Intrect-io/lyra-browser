@@ -121,7 +121,36 @@ def exposure(text: str) -> None:
 # --------------------------------------------------------------------------
 
 
+_HAS_PROC = Path("/proc/self").exists()
+
+
+def _ps(*columns: str) -> list[list[str]]:
+    """Every process's ``columns``, from ps: the off-Linux stand-in for /proc.
+
+    ``command`` must be last; it keeps its spaces. Used only where a gate needs to find
+    or end a browser it launched (macOS has no /proc); what genuinely needs /proc (open
+    sockets, the exact argv bytes) is still skipped off Linux, as the gate says.
+    """
+    out = subprocess.run(
+        ["ps", "-axww", "-o", ",".join(f"{c}=" for c in columns)],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout
+    rows = []
+    for line in out.splitlines():
+        parts = line.split(None, len(columns) - 1)
+        if len(parts) == len(columns):
+            rows.append(parts)
+    return rows
+
+
 def read_cmdline(pid: int) -> list[str]:
+    if not _HAS_PROC:
+        for found, command in _ps("pid", "command"):
+            if found == str(pid):
+                return command.split()
+        return []
     try:
         raw = Path(f"/proc/{pid}/cmdline").read_bytes()
     except OSError:
@@ -131,6 +160,10 @@ def read_cmdline(pid: int) -> list[str]:
 
 def process_alive(pid: int) -> bool:
     """Whether ``pid`` runs (a zombie awaiting its parent does not)."""
+    if not _HAS_PROC:
+        return any(
+            found == str(pid) and not state.startswith("Z") for found, state in _ps("pid", "state")
+        )
     try:
         stat = Path(f"/proc/{pid}/stat").read_text()
     except OSError:
@@ -174,6 +207,9 @@ def is_loopback(address: str) -> bool:
 
 def browsers_of(data_dir: Path) -> list[int]:
     """Processes whose command line says they run on a profile under ``data_dir``."""
+    if not _HAS_PROC:
+        wanted_text = f"--user-data-dir={data_dir}"
+        return [int(pid) for pid, command in _ps("pid", "command") if wanted_text in command]
     wanted = f"--user-data-dir={data_dir}".encode()
     found = []
     for entry in Path("/proc").iterdir():
