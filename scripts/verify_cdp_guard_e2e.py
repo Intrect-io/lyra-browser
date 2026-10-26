@@ -276,17 +276,19 @@ self.addEventListener('fetch', e => {
 # The page-side half of the prototype trick: ``navigator.serviceWorker.register`` is replaced
 # by Playwright's ``service_workers="block"`` init script, ``ServiceWorkerContainer.prototype``
 # is not. The title is the page's way of saying the worker is active.
-REGISTER_SW = """<!doctype html><title>reg</title><script>
-ServiceWorkerContainer.prototype.register.call(
-    navigator.serviceWorker, '/js/sw.js', {scope: '/js/'})
-  .then(reg => {
+REGISTER_SW = "<!doctype html><title>reg</title>reg"
+
+# Registers AWAY's worker and resolves once it is active. It runs in an isolated world:
+# Playwright 1.64 blocks workers by replacing ServiceWorkerContainer.prototype.register in
+# the main world (every frame), and an isolated world has prototypes of its own.
+REGISTER_SW_JS = """new Promise(resolve => {
+  navigator.serviceWorker.register('/js/sw.js', {scope: '/js/'}).then(reg => {
     const w = reg.installing || reg.waiting || reg.active;
-    const done = () => { document.title = 'registered'; };
+    const done = () => { if (w.state === 'activated') resolve('registered'); };
     if (w.state === 'activated') return done();
-    w.addEventListener('statechange', () => { if (w.state === 'activated') done(); });
-  })
-  .catch(e => { document.title = 'error ' + e; });
-</script>"""
+    w.addEventListener('statechange', done);
+  }).catch(e => resolve('error ' + e));
+})"""
 
 # 43 bytes: the smallest GIF, for the page with a hundred subresources.
 GIF = bytes.fromhex(
@@ -768,7 +770,16 @@ async def section_wire(env: Env) -> None:
             if sys.platform.startswith("linux"):
                 cmd = read_cmdline(pid)
                 expect("--remote-debugging-port=0" in cmd, "chrome has the debugging port", cmd)
-                expect("--remote-debugging-pipe" in cmd, "and still Playwright's own pipe", cmd)
+                native = r.ctx.session.active_driver == "native"
+                if native:
+                    # Native drives Chrome over the debugging port too: there is no pipe.
+                    expect(
+                        "--remote-debugging-pipe" not in cmd,
+                        "native shares the debugging port and opens no pipe",
+                        cmd,
+                    )
+                else:
+                    expect("--remote-debugging-pipe" in cmd, "and still Playwright's own pipe", cmd)
                 expect(
                     "--enable-unsafe-swiftshader" not in cmd,
                     "Playwright's --enable-unsafe-swiftshader is dropped",
@@ -783,8 +794,13 @@ async def section_wire(env: Env) -> None:
                 ours, theirs = launch_switches(cmd), launch_switches(route_cmd)
                 added = [a for a in ours if a not in theirs]
                 removed = [a for a in theirs if a not in ours]
+                if native:
+                    # The route control is a Playwright launch (route control stays on
+                    # Playwright), so the two command lines come from different launchers.
+                    note(f"native launch vs Playwright's route launch: +{added} -{removed}")
                 expect(
-                    bool(route_cmd)
+                    native
+                    or bool(route_cmd)
                     and added == ["--remote-debugging-port=0"]
                     and removed in ([], ["--enable-unsafe-swiftshader"])
                     and "--enable-unsafe-swiftshader" not in ours,
@@ -1784,18 +1800,31 @@ async def section_scenarios(env: Env) -> None:
 
 
 async def register_worker(r: Rig, world: World, page) -> None:
-    """AWAY registers its service worker from a page of its own. The context blocks
-    ``navigator.serviceWorker.register``; the one on the prototype is not blocked."""
+    """AWAY registers its service worker on a page of its own, from an isolated world: the
+    context blocks registration in the page's own world."""
     r.ctx.perms.revoke_all()
     r.grant(world.away, "navigate")
     await page.goto(f"{world.away}/s/reg", wait_until="load", timeout=15000)
-
-    async def answered() -> bool:
-        return await page.title() != "reg"
-
-    await wait_for(answered, "AWAY's worker to register", 15.0)
-    title = await page.title()
-    _must(title == "registered", f"AWAY's service worker did not become active: {title!r}")
+    cdp = await page.context.new_cdp_session(page)
+    tree = await cdp.send("Page.getFrameTree")
+    isolated = await cdp.send(
+        "Page.createIsolatedWorld",
+        {"frameId": tree["frameTree"]["frame"]["id"], "worldName": "gate-register-sw"},
+    )
+    answer = await asyncio.wait_for(
+        cdp.send(
+            "Runtime.evaluate",
+            {
+                "expression": REGISTER_SW_JS,
+                "contextId": isolated["executionContextId"],
+                "awaitPromise": True,
+                "returnByValue": True,
+            },
+        ),
+        15.0,
+    )
+    state = (answer.get("result") or {}).get("value")
+    _must(state == "registered", f"AWAY's service worker did not become active: {answer!r}")
     await asyncio.sleep(0.5)  # it claims the open clients
 
 
@@ -1847,6 +1876,14 @@ async def ask_for_swpage(r: Rig, world: World, page, via: str, granted: bool) ->
     return result
 
 
+def opener_unchanged(res: dict, title: str) -> bool:
+    """The opener still shows ``res["start"]``. Playwright 1.64's ``title()`` can report
+    Chrome's pending entry ("Loading <url>") for the refused navigation instead of the
+    document's own title; the URL and AWAY's empty request log show the document is the same."""
+    url, seen = res["opener"]
+    return url == res["start"] and (seen == title or seen.startswith("Loading "))
+
+
 @section
 async def section_workers_sw(env: Env) -> None:
     """A service worker that would answer a navigation does not get it past the guard:
@@ -1872,7 +1909,7 @@ async def section_workers_sw(env: Env) -> None:
                     and "from-sw" not in titles
                     and "from-network" not in titles
                     and not any(url.startswith(world.away) for url, _title in res["tabs"])
-                    and res["opener"] == (res["start"], "swlink" if via == "link" else "home")
+                    and opener_unchanged(res, "swlink" if via == "link" else "home")
                     and len(denied) == 1
                     and res["refusals"] == 1,
                     f"{via}: AWAY not granted: the navigation the worker would answer is judged "
