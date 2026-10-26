@@ -507,6 +507,34 @@ async def test_an_allowed_request_is_continued_once_and_nothing_else_is_sent(pag
     assert page_rig.navigation.refusals == 0
 
 
+async def test_the_guard_vouches_for_what_it_let_through_and_only_once(page_rig):
+    """The native driver's backstop interceptor sits after the guard in Chrome's chain
+    and lets a document through only if the guard vouched for it."""
+    page_rig.chrome.paused("S1", "r1", "https://a.example/next")
+    await page_rig.chrome.settle()
+    guard = page_rig.guard
+    assert guard.vouched("r1", "https://a.example/next")
+    assert not guard.vouched("r1", "https://a.example/next"), "a vouch is spent once"
+
+
+async def test_the_guard_never_vouches_for_what_it_refused_or_never_saw(page_rig):
+    page_rig.chrome.paused("S1", "r1", "https://b.example/elsewhere")  # refused
+    await page_rig.chrome.settle()
+    guard = page_rig.guard
+    assert not guard.vouched("r1", "https://b.example/elsewhere")
+    # A request Chrome released because the guard's connection ended was never judged.
+    assert not guard.vouched("r9", "https://a.example/released")
+
+
+async def test_a_redirect_hop_is_vouched_for_its_own_url(page_rig):
+    page_rig.chrome.paused("S1", "r1", "https://a.example/start")
+    page_rig.chrome.paused("S1", "r1", "https://a.example/landing", redirected_from="r1")
+    await page_rig.chrome.settle()
+    guard = page_rig.guard
+    assert guard.vouched("r1", "https://a.example/landing")
+    assert guard.vouched("r1", "https://a.example/start")
+
+
 async def test_a_refused_request_is_answered_with_a_204_and_never_failed_or_aborted(page_rig):
     page_rig.chrome.paused("S1", "r1", "https://b.example/elsewhere")
     await page_rig.chrome.settle()

@@ -470,6 +470,8 @@ class BrowserSession:
         self._page: Page | None = None
         self._active_channel: str | None = None
         self._active_driver: str | None = None
+        # Pending backstop installs on new tabs (native only); held so they are not lost.
+        self._backstops: set[asyncio.Future] = set()
         self._starting = False
         # Whether a launch ever succeeded. That is what tells "never opened" from "was
         # opened and has been closed": a reader may start the first, never reopen the second.
@@ -776,6 +778,32 @@ class BrowserSession:
                 raise GuardLost(str(exc)) from None
             raise
         self._cdp_guard = sidecar
+        if self._active_driver == "native":
+            for page in list(self._context.pages):
+                await self._install_backstop(page, sidecar)
+
+    async def _install_backstop(self, page: Page, sidecar: CdpGuard) -> None:
+        """A second document interceptor on the native driver's own connection.
+
+        Chrome puts it after the guard's (measured: it sees only what the guard let
+        through). It lets a request go only if the guard vouched for it, so what the
+        guard releases by losing its connection — Chrome continues every held request
+        the moment that connection closes, before the session can kill the browser — is
+        stopped here instead of reaching its server. Playwright has no such second
+        connection; native does, so native closes the loss window the cdp guard alone
+        cannot. Best effort: a tab that closed first needs nothing.
+        """
+        enable = getattr(page, "enable_request_filter", None)
+        if enable is None:
+            return
+        try:
+            await enable(
+                lambda paused: sidecar.vouched(
+                    paused.get("networkId") or "", (paused.get("request") or {}).get("url", "")
+                )
+            )
+        except Exception:  # noqa: BLE001 — a closed tab has nothing to backstop
+            pass
 
     def _on_guard_lost(self, sidecar: CdpGuard, reason: str) -> None:
         """The sidecar's connection ended or failed. Called from its reader: only schedules."""
@@ -868,6 +896,10 @@ class BrowserSession:
         self._watch_downloads(page)
         self._observe(page)
         self._page = page
+        if self._active_driver == "native" and self._cdp_guard is not None:
+            task = asyncio.ensure_future(self._install_backstop(page, self._cdp_guard))
+            self._backstops.add(task)
+            task.add_done_callback(self._backstops.discard)
 
     def _observe(self, page: Page) -> None:
         """Hand a tab to every registered observer. Best effort, like the download

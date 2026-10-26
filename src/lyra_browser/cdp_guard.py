@@ -87,6 +87,8 @@ SETUP_TIMEOUT_S = 10.0
 EXIT_GRACE_S = 0.3
 # Redirect hops remembered so a hop can say where it came from; oldest forgotten first.
 _CHAIN_MAX = 128
+# Allowed document requests remembered for the backstop interceptor; oldest forgotten.
+_VOUCHED_MAX = 256
 
 _KILL = getattr(signal, "SIGKILL", signal.SIGTERM)
 
@@ -386,6 +388,9 @@ class CdpGuard:
         self._setups: set[asyncio.Task] = set()
         self._guarded: set[str] = set()
         self._chain: OrderedDict[tuple[str, str], str] = OrderedDict()
+        # Document requests this guard let through, keyed by (networkId, url), for a
+        # second interceptor further down Chrome's chain to check (see ``vouched``).
+        self._vouched: OrderedDict[tuple[str, str], None] = OrderedDict()
         self._starting = False
         self._closing = False
         self.lost: str | None = None
@@ -656,6 +661,9 @@ class CdpGuard:
         except Exception as exc:  # noqa: BLE001 — a broken guard must not open the gate
             allow = self._judge.verdict_on_error(exc)
         if allow:
+            # Recorded before the answer goes out: an interceptor after this one sees
+            # the request only once Chrome has the continue.
+            self._vouch(params)
             self._fire(session, "Fetch.continueRequest", {"requestId": request_id})
         else:
             # 204, never an abort: an abort sends the tab to chrome-error:// and the DOM
@@ -663,6 +671,31 @@ class CdpGuard:
             self._fire(
                 session, "Fetch.fulfillRequest", {"requestId": request_id, "responseCode": 204}
             )
+
+    def _vouch(self, params: dict) -> None:
+        # Never raises: it runs on the allow path, which a malformed event can reach in
+        # observe mode, and nothing here may stop the answer from going out.
+        request = params.get("request")
+        url = request.get("url") if isinstance(request, dict) else None
+        if not isinstance(url, str):
+            return
+        key = (params.get("networkId") or "", url)
+        self._vouched[key] = None
+        while len(self._vouched) > _VOUCHED_MAX:
+            self._vouched.popitem(last=False)
+
+    def vouched(self, network_id: str, url: str) -> bool:
+        """Whether this guard let this document request through (and forget it).
+
+        For a second ``Fetch`` interceptor that Chrome puts after this one: it sees a
+        request only after this guard has answered it. A request it sees that this
+        guard never vouched for was not judged here: Chrome released it because this
+        connection ended while it was held. Chrome releases every held request the
+        moment the connection closes, before anything here can kill the browser
+        (measured: one request in 40 loss windows got out on each driver), so only
+        an interceptor that outlives this connection can stop those.
+        """
+        return self._vouched.pop((network_id or "", url), "missing") is None
 
     def _redirect_source(self, session: str, params: dict) -> str:
         """The URL of the request whose redirect produced this one, "" for a first request."""
