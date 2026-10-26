@@ -61,7 +61,8 @@ def _members(pgid: int) -> list[int]:
         if not name.isdigit():
             continue
         try:
-            stat = open(f"/proc/{name}/stat", encoding="utf-8").read()
+            with open(f"/proc/{name}/stat", encoding="utf-8") as handle:
+                stat = handle.read()
         except OSError:
             continue
         # pid (comm) state ppid pgrp ...; comm may contain spaces and parentheses.
@@ -73,7 +74,8 @@ def _members(pgid: int) -> list[int]:
 
 def _running(pid: int) -> bool:
     try:
-        stat = open(f"/proc/{pid}/stat", encoding="utf-8").read()
+        with open(f"/proc/{pid}/stat", encoding="utf-8") as handle:
+            stat = handle.read()
     except OSError:
         return False
     return stat[stat.rfind(")") + 2 :].split()[0] != "Z"
