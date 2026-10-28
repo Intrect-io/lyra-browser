@@ -303,7 +303,8 @@ def read_keychain_password(browser: str) -> tuple[bytes | None, str]:
     err = done.stderr.decode(errors="replace").lower()
     if done.returncode == 44 or "could not be found" in err:
         return None, "not-found"
-    if "user interaction is not allowed" in err:
+    # 36: errSecInteractionNotAllowed, as from an SSH session (no dialog can show).
+    if done.returncode == 36 or "user interaction is not allowed" in err:
         return None, "locked"
     if done.returncode == 128 or "canceled" in err:
         return None, "denied"
@@ -697,6 +698,11 @@ _KEYRING_HINTS = {
         "the source's cookies are sealed with a keyring key (v11), and no Secret "
         "Service is reachable on the session bus (DBUS_SESSION_BUS_ADDRESS)."
     ),
+    "keychain-locked": (
+        "the source's cookies are sealed with a key in your login Keychain, which cannot "
+        "ask you from this session (an SSH session, say). Run the import in a Terminal "
+        "on the Mac's own screen and allow the Keychain's request."
+    ),
     "denied": "the Keychain was asked for the browser's 'Safe Storage' key and refused.",
     "error": "the source's cookies are sealed with a keyring key, and the keyring failed.",
 }
@@ -768,6 +774,8 @@ def import_profile(
             password, keyring = read_keyring_password(app, unlock=unlock_keyring)
         elif sys.platform == "darwin" and _has_prefix(cookies, b"v10"):
             password, keyring = read_keychain_password(source.browser)
+            if keyring == "locked":
+                keyring = "keychain-locked"
         if password:
             crypto.keyring_passwords.append(password)
         elif keyring != "not-needed" and not dry_run:

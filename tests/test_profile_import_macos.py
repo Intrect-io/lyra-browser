@@ -64,6 +64,7 @@ def test_the_linux_keys_are_not_tried_on_macos():
         (0, KEYCHAIN + b"\n", b"", "ok"),
         (44, b"", b"The specified item could not be found in the keychain.", "not-found"),
         (36, b"", b"User interaction is not allowed.", "locked"),
+        (36, b"", b"", "locked"),
         (128, b"", b"", "denied"),
         (1, b"", b"something else", "error"),
     ],
