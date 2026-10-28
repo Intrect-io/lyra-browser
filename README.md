@@ -899,6 +899,10 @@ outside `--sites`, and that the source's files did not change (26 checks, one ru
 compares what lyra's Chrome holds (CDP `Storage.getCookies`, on `about:blank`) with what
 was imported: on one `v10` profile, 25 cookies in the source, 4 session-only, 21
 imported, 14 unexpired, and Chrome reported those 14 with the same names and values.
+Three real `v11` profiles on the same machine (118 to 144 cookies) were not measured:
+their keyring was locked over SSH, and the import refused them as described above. The
+`v11` path is measured by the gate only, with cookies a real Chrome sealed through a
+throwaway keyring.
 
 ## Configuration (env)
 
