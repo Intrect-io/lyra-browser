@@ -596,7 +596,6 @@ def test_an_interrupted_network_swap_restores_the_old_cookie_file(tmp_path):
     assert (network / "Trust Tokens").read_bytes() == b"lyra's"
 
 
-def test_off_linux_no_cookie_is_guessed_open(monkeypatch):
-    monkeypatch.setattr(sys, "platform", "darwin")
+def test_on_windows_no_cookie_is_guessed_open():
     sealed = seal(b"x", "a.test", b"v10", b"peanuts")
-    assert CookieCrypto().decrypt(sealed, "a.test", SCHEMA) is None
+    assert CookieCrypto(platform="win32").decrypt(sealed, "a.test", SCHEMA) is None

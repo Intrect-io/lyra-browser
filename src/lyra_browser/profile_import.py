@@ -47,6 +47,7 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterable
@@ -70,9 +71,22 @@ TARGET_PROFILE = "Default"
 _SALT = b"saltysalt"
 _IV = b" " * 16
 _V10_PASSWORD = b"peanuts"
+# macOS: the Keychain password goes through 1003 rounds; Playwright launches Chrome
+# with --use-mock-keychain, whose password is this one.
+_MAC_ITERATIONS = 1003
+_MAC_MOCK_PASSWORD = b"mock_password"
 # From cookie schema 24 (Chrome 130) the plaintext starts with SHA-256(host_key),
 # which binds a value to its domain. It also tells a right key from a wrong one.
 _DOMAIN_HASH_SCHEMA = 24
+
+# Keychain item (service, account) per browser on macOS.
+KEYCHAIN_ITEMS = {
+    "chrome": ("Chrome Safe Storage", "Chrome"),
+    "chrome-beta": ("Chrome Safe Storage", "Chrome"),
+    "chromium": ("Chromium Safe Storage", "Chromium"),
+    "msedge": ("Microsoft Edge Safe Storage", "Microsoft Edge"),
+    "brave": ("Brave Safe Storage", "Brave"),
+}
 
 # Secret Service ``application`` attribute per browser, as each one stores its
 # "<Name> Safe Storage" password.
@@ -267,28 +281,79 @@ def read_keyring_password(application: str, *, unlock: bool = False) -> tuple[by
     return None, status
 
 
+def read_keychain_password(browser: str) -> tuple[bytes | None, str]:
+    """The "Safe Storage" password from the macOS login Keychain.
+
+    ``security`` makes the Keychain ask the person (its own dialog: "allow" or
+    "always allow" lyra's Python); lyra never sees the Keychain password itself.
+    Status as for ``read_keyring_password``, plus ``denied`` when they refuse.
+    """
+    service, account = KEYCHAIN_ITEMS.get(browser, KEYCHAIN_ITEMS["chrome"])
+    try:
+        done = subprocess.run(
+            ["security", "find-generic-password", "-w", "-s", service, "-a", account],
+            capture_output=True,
+            timeout=_UNLOCK_TIMEOUT_S,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None, "error"
+    if done.returncode == 0 and done.stdout.strip():
+        return done.stdout.strip(), "ok"
+    err = done.stderr.decode(errors="replace").lower()
+    if done.returncode == 44 or "could not be found" in err:
+        return None, "not-found"
+    if "user interaction is not allowed" in err:
+        return None, "locked"
+    if done.returncode == 128 or "canceled" in err:
+        return None, "denied"
+    return None, "error"
+
+
 @dataclass
 class CookieCrypto:
     """Opens the source's cookie values and seals them the way lyra's Chrome reads them.
 
-    ``v11_passwords`` are tried in order; Chrome falls back to an empty password
-    when its keyring hands it nothing, so ``b""`` is always the last candidate.
+    Linux: ``v10`` is the fixed "peanuts" key; ``v11`` uses ``keyring_passwords``
+    (the Secret Service secret), then the empty password Chrome falls back to.
+    macOS: ``v10`` uses ``keyring_passwords`` (the Keychain's "Safe Storage" item,
+    1003 PBKDF2 rounds). lyra's own Chrome runs on Playwright's mock keychain there,
+    whose password is "mock_password" (measured 2026-10-28, Chrome 156). Windows
+    (DPAPI, app-bound ``v20``) is not handled: nothing opens there.
     """
 
-    v11_passwords: list[bytes] = field(default_factory=list)
-    _v11_keys: list[bytes] | None = None
-    _v10_key: bytes = field(default_factory=lambda: _derive_key(_V10_PASSWORD))
+    keyring_passwords: list[bytes] = field(default_factory=list)
+    platform: str = field(default_factory=lambda: sys.platform)
+    _keys: dict[bytes, list[bytes]] = field(default_factory=dict)
+
+    @property
+    def _mac(self) -> bool:
+        return self.platform == "darwin"
+
+    @property
+    def _linux(self) -> bool:
+        return self.platform.startswith("linux")
 
     def _keys_for(self, prefix: bytes) -> list[bytes]:
-        if not sys.platform.startswith("linux"):
-            return []  # macOS: a Keychain key; Windows: DPAPI, and v20 is app-bound
-        if prefix == b"v10":
-            return [self._v10_key]
-        if prefix == b"v11":
-            if self._v11_keys is None:
-                self._v11_keys = [_derive_key(p) for p in [*self.v11_passwords, b""]]
-            return self._v11_keys
-        return []
+        if prefix not in self._keys:
+            if self._linux and prefix == b"v10":
+                keys = [_derive_key(_V10_PASSWORD)]
+            elif self._linux and prefix == b"v11":
+                keys = [_derive_key(p) for p in [*self.keyring_passwords, b""]]
+            elif self._mac and prefix == b"v10":
+                # Its own seal first: a profile lyra re-synced from may hold both.
+                passwords = [*self.keyring_passwords, _MAC_MOCK_PASSWORD]
+                keys = [_derive_key(p, _MAC_ITERATIONS) for p in passwords]
+            else:
+                keys = []
+            self._keys[prefix] = keys
+        return self._keys[prefix]
+
+    @property
+    def _target_key(self) -> bytes:
+        if self._mac:
+            return _derive_key(_MAC_MOCK_PASSWORD, _MAC_ITERATIONS)
+        return _derive_key(_V10_PASSWORD)
 
     def decrypt(self, encrypted: bytes, host_key: str, schema: int) -> bytes | None:
         """The plaintext value, or None when no key this side has opens it."""
@@ -308,9 +373,10 @@ class CookieCrypto:
         return None
 
     def encrypt_v10(self, value: bytes, host_key: str, schema: int) -> bytes:
+        """Seal ``value`` as ``v10`` with the key lyra's own Chrome reads on this platform."""
         if schema >= _DOMAIN_HASH_SCHEMA:
             value = hashlib.sha256(host_key.encode()).digest() + value
-        return b"v10" + _aes_cbc(self._v10_key, _pad(value), encrypt=True)
+        return b"v10" + _aes_cbc(self._target_key, _pad(value), encrypt=True)
 
 
 # --------------------------------------------------------------------------- scope
@@ -631,6 +697,7 @@ _KEYRING_HINTS = {
         "the source's cookies are sealed with a keyring key (v11), and no Secret "
         "Service is reachable on the session bus (DBUS_SESSION_BUS_ADDRESS)."
     ),
+    "denied": "the Keychain was asked for the browser's 'Safe Storage' key and refused.",
     "error": "the source's cookies are sealed with a keyring key, and the keyring failed.",
 }
 
@@ -650,16 +717,17 @@ def pinned_candidates(config: Config) -> list[str | None]:
     return [channel]
 
 
-def _has_v11(cookies: Path) -> bool:
-    """Whether the source holds keyring-sealed cookies, so the keyring is worth asking."""
+def _has_prefix(cookies: Path, prefix: bytes) -> bool:
+    """Whether any source cookie is sealed with ``prefix``, so its key is worth asking for."""
     if not cookies.exists():
         return False
     try:
         db = sqlite3.connect(f"{cookies.resolve().as_uri()}?mode=ro", uri=True, timeout=5)
         try:
             row = db.execute(
-                # A BLOB never equals TEXT in SQLite: 'v11' would match nothing.
-                "select 1 from cookies where substr(encrypted_value, 1, 3) = x'763131' limit 1"
+                # A BLOB never equals TEXT in SQLite: compare with a blob literal.
+                "select 1 from cookies where substr(encrypted_value, 1, 3) = ? limit 1",
+                (prefix,),
             ).fetchone()
         finally:
             db.close()
@@ -693,14 +761,18 @@ def import_profile(
     keyring = "not-needed"
     if crypto is None:
         crypto = CookieCrypto()
-        if sys.platform.startswith("linux") and _has_v11(source.path / cookie_path(source.path)):
+        cookies = source.path / cookie_path(source.path)
+        password: bytes | None = None
+        if sys.platform.startswith("linux") and _has_prefix(cookies, b"v11"):
             app = KEYRING_APPLICATIONS.get(source.browser, "chrome")
             password, keyring = read_keyring_password(app, unlock=unlock_keyring)
-            if password:
-                crypto.v11_passwords.append(password)
-            elif not dry_run:
-                # Importing the storage without the cookies would be half a login.
-                raise ImportError_(_KEYRING_HINTS.get(keyring, _KEYRING_HINTS["error"]))
+        elif sys.platform == "darwin" and _has_prefix(cookies, b"v10"):
+            password, keyring = read_keychain_password(source.browser)
+        if password:
+            crypto.keyring_passwords.append(password)
+        elif keyring != "not-needed" and not dry_run:
+            # Importing the storage without the cookies would be half a login.
+            raise ImportError_(_KEYRING_HINTS.get(keyring, _KEYRING_HINTS["error"]))
 
     config.data_dir.mkdir(parents=True, exist_ok=True)
     lock = _profile_lock(config)
