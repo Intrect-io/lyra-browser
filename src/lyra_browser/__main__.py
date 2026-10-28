@@ -2,12 +2,14 @@
 
 VEGA (mcp.json) and Hermes (config.yaml ``mcp_servers``) spawn this as a stdio
 MCP server. Pass ``--http`` to instead serve over Streamable HTTP for
-remote/dev use.
+remote/dev use. ``lyra-browser profile ...`` imports the logins of the person's own
+browser profile instead of serving (see profile_cli.py).
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 from .config import CLIENTS, Config
@@ -68,6 +70,14 @@ def config_from_args(args: argparse.Namespace) -> Config:
 
 
 def main() -> None:
+    argv = sys.argv[1:]
+    # The Claude Code plugin's launcher puts `--client claude-code` before whatever
+    # it is given, so `profile` may come second.
+    lead = argv[:2] if argv[:1] == ["--client"] else []
+    if argv[len(lead) : len(lead) + 1] == ["profile"]:
+        from .profile_cli import main as profile_main
+
+        raise SystemExit(profile_main([*argv[len(lead) + 1 :], *lead]))
     args = build_parser().parse_args()
     if args.uat_run is not None:
         from .uat.server import serve_stdio

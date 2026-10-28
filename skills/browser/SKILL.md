@@ -43,6 +43,10 @@ plain fetching is cheaper.
 - `open_browser` reporting `profile: "instance"`: a second server is already
   on the shared profile, so this one got a private, empty profile without the
   user's logins. Tell the user before doing anything that needs a login.
+- `open_browser` reporting `imported_from`: the user imported the logins of
+  their own Chrome profile, so on those sites you act as them. If a login is
+  missing, the user can import or re-sync it with `lyra-browser profile import`
+  (a terminal command for them; there is no tool for it).
 - `browser_unavailable`: no Chrome or Edge on this machine and no bundled
   Chromium. Offer `/lyra-browser:install-browser`, which installs one into the
   plugin's own environment.

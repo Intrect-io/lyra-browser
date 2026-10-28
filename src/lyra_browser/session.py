@@ -33,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 from .cdp_guard import EXIT_GRACE_S, CdpGuard, CdpGuardError, prepare_profile
 from .config import Config
 from .dialogs import DialogHandler
+from .profile_import import pinned_candidates
 
 try:  # POSIX only. Without it the profile is simply not guarded, as it never was.
     import fcntl
@@ -693,7 +694,7 @@ class BrowserSession:
         self._pw = await self._start_playwright()
         cache = UserAgentCache(self._config.data_dir / _UA_CACHE_NAME)
 
-        candidates = self._config.browser_candidates()
+        candidates = pinned_candidates(self._config)
         last_error: Exception | None = None
         override: str | None = None
         for channel in candidates:

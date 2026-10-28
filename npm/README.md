@@ -33,6 +33,10 @@ over stdio there is nobody to answer.
 Arguments after the package name go to the server, so
 `npx -y @intrect/lyra-browser --http --port 8765` serves over HTTP.
 
+`npx -y @intrect/lyra-browser profile import --profile "Work"` brings the logins of
+one of your own Chrome profiles into lyra's (`profile list` shows them); see the
+README, [Using your own Chrome logins](https://github.com/Intrect-io/lyra-browser#using-your-own-chrome-logins).
+
 ## Needs
 
 - **Node 18 or later.**

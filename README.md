@@ -825,6 +825,79 @@ A page's own globals are not visible to `page.evaluate` on native by default, be
 evaluates in an isolated world as patchright does. Pass `world="main"` for them
 (`tools/forms._main_world` picks the right keyword for each driver).
 
+## Using your own Chrome logins
+
+lyra's profile starts empty. Rather than logging in again inside it, a person can
+bring the logins of one of their own browser profiles across, on the command line:
+
+```bash
+lyra-browser profile list                                  # profiles on this machine
+lyra-browser profile import --profile "Work" --dry-run     # count what would move
+lyra-browser profile import --profile "Work"               # import; run again to sync
+lyra-browser profile import --profile "Work" --sites github.com,linear.app
+lyra-browser profile status                                # what was last imported
+```
+
+It is a command, not a tool: the model cannot pull a profile in, because whoever
+runs it decides that the agent may act as them on those sites. `--client` and
+`--data-dir` pick whose lyra profile receives it, as for the server. `open_browser`
+then reports `imported_from` and says, in its note, that on those sites the agent
+acts as the user.
+
+What moves, from `<profile>` into lyra's `profile/Default`, and nothing else:
+
+| Component | How |
+| --- | --- |
+| `Cookies` | Row by row, decrypted and sealed again for lyra (below). Session cookies are left out: Chrome deletes them when it starts. |
+| `Local Storage` | Whole. It is one database for every site, so a `--sites` list or `LYRA_BROWSER_DENIED_ORIGINS` leaves it out instead. |
+| `IndexedDB`, `WebStorage` | Per origin / per storage bucket, filtered by site. |
+
+Saved passwords (`Login Data`), extensions, history and `Preferences` (absolute
+paths, account tokens) are never copied. `LYRA_BROWSER_DENIED_ORIGINS` is applied at
+import too: a refused site's cookies stay behind, and so does a domain cookie that
+would be sent to it.
+
+**Sync means replace.** Re-running the import replaces lyra's cookies for the sites
+in scope (every site without `--sites`) and the other components with the source's,
+so whatever lyra's own sessions stored there is overwritten; cookies for other sites
+stay. The import takes `<data_dir>/profile.lock` and refuses while a lyra browser
+holds it (`close_browser` first). It stages everything beside the profile and swaps
+each component in, so a failed import leaves the old profile as it was.
+
+**The source is read-only and may be running.** SQLite files are read through the
+backup API; LevelDB directories are copied file by file (without `LOCK`) and copied
+again if they changed meanwhile, so a running browser's last few writes may be
+missing.
+
+**Cookie encryption (Linux).** Playwright launches Chrome with
+`--password-store=basic`, so lyra's cookies are sealed `v10`, with Chrome's fixed key.
+A Chrome that found a desktop keyring seals them `v11`, with a secret in that
+keyring; copied as they are they would never open in lyra. The import fetches that
+secret from the Secret Service (D-Bus), opens each cookie and seals it again as
+`v10`. Whether it decrypted is checked, not assumed: since cookie schema 24 each
+plaintext starts with the SHA-256 of its domain. A cookie that does not open is
+counted and left out. When the cookies are `v11` and the login keyring is locked
+(a session over SSH, say), the import refuses rather than bringing the storage
+without the cookies; `--unlock-keyring` lets the keyring prompt for its own password
+on the desktop. lyra never asks for or sees that password. macOS (Keychain) and
+Windows (DPAPI, app-bound `v20`) cookies are not decrypted yet; they are reported as
+undecryptable.
+
+**Which Chrome opens it.** Chrome migrates a profile forward only, so after an import
+from Chrome (or Edge, or Chrome Beta) lyra launches that browser and no fallback; an
+explicit `LYRA_BROWSER_CHANNEL` still wins. The import refuses when lyra's cookie
+database has a different schema from the source's.
+
+Measured 2026-10-28 on Linux (Chrome 154.0.8037.57, Playwright 1.63.0, cookie schema
+24): `scripts/verify_profile_import_e2e.py` runs a real Chrome as the source, once
+with `v10` and once with `v11` cookies (a throwaway gnome-keyring on a private D-Bus
+session), imports, and checks that lyra's page is sent the cookie and reads
+localStorage and IndexedDB back, that a re-import brings a new login and keeps cookies
+outside `--sites`, and that the source's files did not change (26 checks, one run).
+`scripts/measure_profile_import.py` imports a real profile into a throwaway data dir and
+compares what lyra's Chrome holds (CDP `Storage.getCookies`, on `about:blank`) with what
+was imported: on one `v10` profile, 25 cookies in the source, 4 session-only, 21
+imported, 14 unexpired, and Chrome reported those 14 with the same names and values.
 
 ## Configuration (env)
 
