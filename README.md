@@ -879,9 +879,10 @@ plaintext starts with the SHA-256 of its domain. A cookie that does not open is
 counted and left out. When the cookies are `v11` and the login keyring is locked
 (a session over SSH, say), the import refuses rather than bringing the storage
 without the cookies; `--unlock-keyring` lets the keyring prompt for its own password
-on the desktop. lyra never asks for or sees that password. macOS (Keychain) and
+on the desktop (it gives up after 120 s when no prompt can be shown). lyra never asks
+for or sees that password. macOS (Keychain) and
 Windows (DPAPI, app-bound `v20`) cookies are not decrypted yet; they are reported as
-undecryptable.
+undecryptable (the import reads `Network/Cookies` where those platforms keep the file).
 
 **Which Chrome opens it.** Chrome migrates a profile forward only, so after an import
 from Chrome (or Edge, or Chrome Beta) lyra launches that browser and no fallback; an

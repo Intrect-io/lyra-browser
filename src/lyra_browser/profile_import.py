@@ -226,6 +226,9 @@ def _unpad(data: bytes) -> bytes | None:
     return data[:-n]
 
 
+_UNLOCK_TIMEOUT_S = 120
+
+
 def read_keyring_password(application: str, *, unlock: bool = False) -> tuple[bytes | None, str]:
     """The "Safe Storage" password a Chrome-family browser keeps in the Secret Service.
 
@@ -246,7 +249,10 @@ def read_keyring_password(application: str, *, unlock: bool = False) -> tuple[by
     try:
         for item in secretstorage.search_items(conn, {"application": application}):
             if item.is_locked() and unlock:
-                item.unlock()  # the keyring's prompt; True means it was dismissed
+                # The keyring's own prompt. With no desktop to show it on it never
+                # answers, so give up after a while instead of hanging the command.
+                with contextlib.suppress(Exception):
+                    item.unlock(timeout=_UNLOCK_TIMEOUT_S)
             if item.is_locked():
                 status = "locked"
                 continue
@@ -274,13 +280,15 @@ class CookieCrypto:
     _v10_key: bytes = field(default_factory=lambda: _derive_key(_V10_PASSWORD))
 
     def _keys_for(self, prefix: bytes) -> list[bytes]:
+        if not sys.platform.startswith("linux"):
+            return []  # macOS: a Keychain key; Windows: DPAPI, and v20 is app-bound
         if prefix == b"v10":
             return [self._v10_key]
-        if prefix == b"v11" and sys.platform.startswith("linux"):
+        if prefix == b"v11":
             if self._v11_keys is None:
                 self._v11_keys = [_derive_key(p) for p in [*self.v11_passwords, b""]]
             return self._v11_keys
-        return []  # v10 on macOS/Windows is a different scheme; v20 is app-bound
+        return []
 
     def decrypt(self, encrypted: bytes, host_key: str, schema: int) -> bytes | None:
         """The plaintext value, or None when no key this side has opens it."""
@@ -611,8 +619,9 @@ class ImportResult:
 _KEYRING_HINTS = {
     "locked": (
         "the source's cookies are sealed with a key in your login keyring, and the "
-        "keyring is locked. Unlock it (log in to the desktop session), or re-run with "
-        "--unlock-keyring to have the keyring ask you for its password."
+        "keyring is locked (as it is in a session over SSH). Unlock it from your desktop "
+        "session and run the import again, or re-run with --unlock-keyring to have the "
+        "keyring prompt for its password on your desktop."
     ),
     "not-found": (
         "the source's cookies are sealed with a keyring key (v11), but the keyring "
@@ -684,7 +693,7 @@ def import_profile(
     keyring = "not-needed"
     if crypto is None:
         crypto = CookieCrypto()
-        if sys.platform.startswith("linux") and _has_v11(source.path / "Cookies"):
+        if sys.platform.startswith("linux") and _has_v11(source.path / cookie_path(source.path)):
             app = KEYRING_APPLICATIONS.get(source.browser, "chrome")
             password, keyring = read_keyring_password(app, unlock=unlock_keyring)
             if password:
@@ -723,11 +732,11 @@ def _import_locked(
     components: dict[str, str] = {}
     try:
         cookies = CookieReport()
-        src_cookies = source.path / "Cookies"
+        src_cookies = source.path / cookie_path(source.path)
         if src_cookies.exists():
             snap = staging / "source-Cookies"
             snapshot_sqlite(src_cookies, snap)
-            current = target / "Cookies"
+            current = target / cookie_path(target, like=source.path)
             cookies = build_cookies(
                 snap, current if current.exists() else None, staging / "Cookies", crypto, scope
             )
@@ -775,7 +784,7 @@ def _import_locked(
         if dry_run:
             return ImportResult(source, cookies, components, sidecar, keyring)
 
-        _swap_in(staging, target, retired)
+        _swap_in(staging, target, retired, cookie_path(target, like=source.path))
         _write_atomic(config.data_dir / SIDECAR_NAME, json.dumps(sidecar, indent=2) + "\n")
         return ImportResult(source, cookies, components, sidecar, keyring)
     finally:
@@ -784,10 +793,27 @@ def _import_locked(
 
 _COMPONENTS = ("Cookies", "Local Storage", "IndexedDB", "WebStorage")
 # Beside the cookie file: a journal left there would be rolled into the new file.
-_COOKIE_SIDE_FILES = ("Cookies-journal", "Cookies-wal", "Cookies-shm")
+_COOKIE_SIDE_SUFFIXES = ("-journal", "-wal", "-shm")
+# Directories a component may sit inside, as opposed to components themselves.
+_CONTAINERS = ("Network",)
 
 
-def _swap_in(staging: Path, target: Path, retired: Path) -> None:
+def cookie_path(profile: Path, *, like: Path | None = None) -> str:
+    """Where a profile keeps its cookie file, relative to it.
+
+    Chrome on Windows and macOS moved it to ``Network/Cookies``; on Linux it stays
+    ``Cookies``. For a profile that has neither yet, follow ``like`` (the source).
+    """
+    for candidate in (profile, like):
+        if candidate is None:
+            continue
+        for rel in ("Network/Cookies", "Cookies"):
+            if (candidate / rel).exists():
+                return rel
+    return "Cookies"
+
+
+def _swap_in(staging: Path, target: Path, retired: Path, cookies_rel: str = "Cookies") -> None:
     """Move each staged component into ``target``; on any failure put the old ones back.
 
     The replaced files wait in ``retired`` until every component is in. A process
@@ -806,13 +832,18 @@ def _swap_in(staging: Path, target: Path, retired: Path) -> None:
             staged = staging / name
             if not staged.exists():
                 continue
-            outgoing = [name, *(_COOKIE_SIDE_FILES if name == "Cookies" else ())]
+            rel = cookies_rel if name == "Cookies" else name
+            outgoing = [rel]
+            if name == "Cookies":
+                outgoing += [rel + suffix for suffix in _COOKIE_SIDE_SUFFIXES]
             for old in outgoing:
                 if (target / old).exists():
+                    (retired / old).parent.mkdir(parents=True, exist_ok=True)
                     os.replace(target / old, retired / old)
                     moved.append(old)
-            os.replace(staged, target / name)
-            placed.append(name)
+            (target / rel).parent.mkdir(parents=True, exist_ok=True)
+            os.replace(staged, target / rel)
+            placed.append(rel)
     except BaseException:
         for name in placed:
             _remove(target / name)
@@ -831,6 +862,9 @@ def _recover(retired: Path, target: Path) -> None:
         return
     target.mkdir(parents=True, exist_ok=True)
     for entry in list(retired.iterdir()):
+        if entry.name in _CONTAINERS and entry.is_dir():
+            _recover(entry, target / entry.name)  # Network/: holds Cookies, not one
+            continue
         if (target / entry.name).exists():
             _remove(entry)  # the swap never got as far as replacing this one
             continue

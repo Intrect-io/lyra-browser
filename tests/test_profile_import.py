@@ -555,3 +555,48 @@ def test_the_plugin_launchers_leading_client_flag_reaches_the_profile_command(
         entry.main()
     assert seen["argv"] == ["list", "--client", "claude-code"]
     assert profile_cli.build_parser().parse_args(seen["argv"]).client == "claude-code"
+
+
+def test_a_network_cookies_layout_is_read_and_written_in_place(tmp_path):
+    source = make_source(tmp_path / "chrome", [])
+    (source.path / "Cookies").unlink()
+    make_cookie_db(
+        source.path / "Network" / "Cookies",
+        [("a.test", "n", seal(b"v", "a.test", b"v10", b"peanuts"))],
+    )
+    cfg = make_config(tmp_path)
+    network = cfg.profile_dir / "Default" / "Network"
+    make_cookie_db(
+        network / "Cookies", [("old.test", "o", seal(b"o", "old.test", b"v10", b"peanuts"))]
+    )
+    (network / "Trust Tokens").write_bytes(b"lyra's")
+
+    result = import_profile(cfg, source, crypto=CookieCrypto())
+
+    assert result.cookies.imported == 1
+    assert read_cookies(network / "Cookies") == {("a.test", "n"): b"v"}
+    assert (network / "Trust Tokens").read_bytes() == b"lyra's"
+    assert not (cfg.profile_dir / "Default" / "Cookies").exists()
+
+
+def test_an_interrupted_network_swap_restores_the_old_cookie_file(tmp_path):
+    cfg = make_config(tmp_path)
+    network = cfg.profile_dir / "Default" / "Network"
+    network.mkdir(parents=True)
+    (network / "Trust Tokens").write_bytes(b"lyra's")
+    retired = cfg.data_dir / "profile.import-retired" / "Network"
+    retired.mkdir(parents=True)
+    make_cookie_db(
+        retired / "Cookies", [("old.test", "o", seal(b"o", "old.test", b"v10", b"peanuts"))]
+    )
+
+    import_profile(cfg, make_source(tmp_path / "chrome", []), crypto=CookieCrypto(), dry_run=True)
+
+    assert read_cookies(network / "Cookies") == {("old.test", "o"): b"o"}
+    assert (network / "Trust Tokens").read_bytes() == b"lyra's"
+
+
+def test_off_linux_no_cookie_is_guessed_open(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    sealed = seal(b"x", "a.test", b"v10", b"peanuts")
+    assert CookieCrypto().decrypt(sealed, "a.test", SCHEMA) is None
