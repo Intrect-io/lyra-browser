@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import errno
 import importlib
+import importlib.util
 import json
 import os
 import shutil
@@ -93,29 +94,67 @@ def load_driver(
     what a launch would try, so a machine whose only Chromium is the one Playwright
     downloaded still gets native.
     """
+    from .native.errors import Error as NativeError
+    from .native.launcher import find_executable
+
+    def has_browser(chans: Sequence[str | None]) -> bool:
+        return _any_executable(chans, find_executable, NativeError)
+
+    modules: dict[str, Any] = {}
+
+    def imports(pkg: str) -> bool:
+        try:
+            modules[pkg] = importlib.import_module(f"{pkg}.async_api")
+        except ImportError:
+            return False
+        return True
+
+    name, missing = choose_driver(preference, channels, has_browser, imports)
+    if name is None:
+        raise ImportError(f"no browser driver installed (tried {', '.join(missing)})")
+    if name == "native":
+        from .native import async_native
+
+        return name, async_native
+    return name, modules[name].async_playwright
+
+
+def installed(pkg: str) -> bool:
+    """Whether a Playwright package is installed, without importing it (``doctor``)."""
+    try:
+        return importlib.util.find_spec(f"{pkg}.async_api") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def choose_driver(
+    preference: str,
+    channels: Sequence[str | None] | None,
+    has_browser: Callable[[Sequence[str | None]], bool],
+    importable: Callable[[str], bool],
+) -> tuple[str | None, list[str]]:
+    """Which driver ``load_driver`` takes, and the ones it passed over: ``(name, missing)``.
+
+    Pure, so ``doctor`` reports the choice a launch would make without importing or
+    launching anything. ``name`` is None when nothing in the preference's order is usable.
+    """
     order = _DRIVER_ORDER.get(preference) or _DRIVER_ORDER["auto"]
     missing: list[str] = []
     for name in order:
         if name == "native":
-            from .native import async_native
-            from .native.errors import Error as NativeError
-            from .native.launcher import find_executable
-
             # Only a pinned request may answer with a machine that has no browser;
             # ``auto`` moves on to a Playwright that brings its own Chromium.
-            if preference != "native" and not _any_executable(
-                channels if channels is not None else _NATIVE_CHANNELS, find_executable, NativeError
+            if preference != "native" and not has_browser(
+                channels if channels is not None else _NATIVE_CHANNELS
             ):
                 missing.append(name)
                 continue
-            return name, async_native
-        try:
-            module = importlib.import_module(f"{name}.async_api")
-        except ImportError:
+            return name, missing
+        if not importable(name):
             missing.append(name)
             continue
-        return name, module.async_playwright
-    raise ImportError(f"no browser driver installed (tried {', '.join(missing)})")
+        return name, missing
+    return None, missing
 
 
 _NATIVE_CHANNELS: tuple[str | None, ...] = ("chrome", "msedge", None)

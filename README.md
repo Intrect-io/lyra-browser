@@ -780,6 +780,42 @@ Windows are not measured. `python scripts/verify_npx_e2e.py` reproduces it. See
 **Deploying it as a remote server (Cloudflare Containers):** see
 [docs/CLOUDFLARE.md](https://github.com/Intrect-io/lyra-browser/blob/master/docs/CLOUDFLARE.md).
 
+## Checking a setup: `lyra-browser doctor`
+
+`lyra-browser doctor` says what a launch would use on this machine and what would stop
+it, without launching a browser, importing a Playwright or writing anything (a probe
+file in the data dir's nearest existing parent is created and removed). It reads the
+same environment and flags as the server (`--client`, `--data-dir`, `--headless`). On
+Linux over SSH (no display), 2026-11-01, asking for a window:
+
+```text
+$ lyra-browser doctor --no-headless
+lyra 0.2.0 (Python 3.12.3), client generic
+driver      native  (auto: native is the first in the order (native, patchright, playwright))
+browser     chrome /opt/google/chrome/chrome
+  chrome     /opt/google/chrome/chrome
+  msedge     not found
+  bundled    /home/me/.cache/ms-playwright/chromium-1208/chrome-linux64/chrome
+window      headful (display no)
+guard       cdp, consent auto
+data dir    /home/me/.lyra-browser (writable)
+profile     free
+ERROR   a window is asked for (headless off) but there is no display
+        fix: set LYRA_BROWSER_HEADLESS=1 (or --headless), or run under a desktop session or xvfb-run
+NOT ok: a launch would fail
+```
+
+It reports the driver `auto` would pick and why (the same decision a launch makes,
+`session.choose_driver`), the browser binary for each channel in the order a launch
+tries them — narrowed to one when an imported profile pins its browser — the data dir
+and whether it can be written, whether another lyra browser holds `profile.lock`, the
+display, the guard backend, the consent channel and the imported profile. Each finding
+is an `ERROR` (a launch would fail) or a `WARNING` (it works, but not as one might
+expect: a held profile means an empty private one) with its fix. `--json` prints the
+same as JSON with a boolean `ok`; the exit code is 0 exactly when `ok` is true. Through
+npx it is `npx -y @intrect/lyra-browser doctor`; the Claude Code plugin's
+`/lyra-browser:doctor` runs it too.
+
 ## Drivers
 
 lyra drives the browser through one of three drivers, picked with `LYRA_BROWSER_DRIVER`

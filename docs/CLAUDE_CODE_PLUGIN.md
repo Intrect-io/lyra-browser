@@ -176,7 +176,7 @@ edit is itself a file write Claude Code asks you about.
 
 | Command | What it does |
 |---|---|
-| `/lyra-browser:doctor` | Prints the plugin's environment, `uv`, the browser it would drive, the display, and whether the shared profile is held by another session. |
+| `/lyra-browser:doctor` | Prints the plugin's environment, `uv`, the browser it would drive, the display, and whether the shared profile is held by another session, then runs `lyra-browser doctor` in the plugin's environment (once it is built, and from the release that has it): the driver and browser a launch would pick, the imported profile's pin, and an `ERROR` line with a fix for whatever would stop the launch. |
 | `/lyra-browser:install-browser` | Installs Playwright's bundled Chromium into the plugin's environment, for a machine with no Chrome or Edge. |
 
 ### Your own Chrome logins

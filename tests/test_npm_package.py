@@ -148,3 +148,12 @@ def test_npm_pack_ships_exactly_the_files_the_package_names():
         "the launcher lost its executable bit in the tarball"
     )
     assert entry["unpackedSize"] < 50_000, "the package is a launcher; something large got in"
+
+
+def test_the_package_reports_the_version_it_ships_as():
+    """``lyra_browser.__version__`` is what ``doctor`` and UAT reports print; it read
+    0.1.0 through the 0.2.0 release because nothing compared it."""
+    import lyra_browser
+
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert lyra_browser.__version__ == project["project"]["version"]

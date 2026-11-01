@@ -56,6 +56,10 @@ README, [Using your own Chrome logins](https://github.com/Intrect-io/lyra-browse
   this is needed: the server drives that browser with no Playwright at all. Extra arguments go to Playwright's installer, e.g.
   `install-browser --with-deps`, which needs root on Linux.
 
+- **What would it launch with?** `npx -y @intrect/lyra-browser doctor` reports the
+  driver, the browser and the data dir a launch would use and why a launch would fail,
+  without starting one (`--json` for a machine; exit code 0 when a launch would work).
+
 ## Start-up time
 
 The first start downloads the server's Python dependencies from PyPI (71 packages on the measured machine);
