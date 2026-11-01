@@ -22,3 +22,6 @@ Then say, in a sentence each, what it means for them:
   can watch, and the collaboration tools answer `unattended`.
 - `profile lock: held`: another lyra session is on the shared profile; this one
   will get an instance profile without logins until that one closes.
+- After `--- lyra-browser doctor`: the server's own report. Each `ERROR` line is
+  why a launch would fail, with its `fix:`; relay those first. `WARNING` lines
+  are launches that work, but not as the user may expect.

@@ -19,6 +19,11 @@ for name in ("lyra-browser", "fastmcp", "playwright", "patchright"):
     except m.PackageNotFoundError:
         print(f"{name + ':':14}not installed")
 PY
+    # The server's own report, from a release that has it (any after 0.2.0).
+    if "$DATA/venv/bin/python" -c "import lyra_browser.doctor" 2>/dev/null; then
+      echo "--- lyra-browser doctor"
+      "$DATA/venv/bin/lyra-browser" --client claude-code doctor
+    fi
   else
     echo "venv:         not built yet (bootstrap.sh runs at session start; log: $DATA/bootstrap.log)"
   fi

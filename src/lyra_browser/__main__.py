@@ -3,7 +3,8 @@
 VEGA (mcp.json) and Hermes (config.yaml ``mcp_servers``) spawn this as a stdio
 MCP server. Pass ``--http`` to instead serve over Streamable HTTP for
 remote/dev use. ``lyra-browser profile ...`` imports the logins of the person's own
-browser profile instead of serving (see profile_cli.py).
+browser profile instead of serving (see profile_cli.py), and ``lyra-browser doctor``
+reports what a launch would use and what would stop it (see doctor.py).
 """
 
 from __future__ import annotations
@@ -78,6 +79,10 @@ def main() -> None:
         from .profile_cli import main as profile_main
 
         raise SystemExit(profile_main([*argv[len(lead) + 1 :], *lead]))
+    if argv[len(lead) : len(lead) + 1] == ["doctor"]:
+        from .doctor import main as doctor_main
+
+        raise SystemExit(doctor_main([*argv[len(lead) + 1 :], *lead]))
     args = build_parser().parse_args()
     if args.uat_run is not None:
         from .uat.server import serve_stdio
