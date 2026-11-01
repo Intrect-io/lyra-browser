@@ -156,6 +156,13 @@ async def lyra_visit(data_dir: Path, *urls: str, headless: bool) -> str:
     try:
         opened = await tools["open_browser"]()
         expect(opened.get("status") == "ok", "lyra launches", opened)
+        # Re-sealed v10 cookies open only under the basic password store, which each
+        # driver passes on its own (native copies Playwright's switches); a run for one
+        # driver must not quietly have been the other.
+        wanted = os.environ.get("LYRA_BROWSER_DRIVER", "")
+        if wanted in ("native", "playwright", "patchright"):
+            ran = ctx.session.active_driver
+            expect(ran == wanted, f"lyra runs on the {wanted} driver", ran)
         for url in urls:
             moved = await tools["navigate"](url=url, reason="profile import e2e", confirm=True)
             expect(moved.get("status") == "ok", f"lyra reaches {urlparse(url).path}", moved)

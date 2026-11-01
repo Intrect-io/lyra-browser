@@ -896,6 +896,9 @@ with `v10` and once with `v11` cookies (a throwaway gnome-keyring on a private D
 session), imports, and checks that lyra's page is sent the cookie and reads
 localStorage and IndexedDB back, that a re-import brings a new login and keeps cookies
 outside `--sites`, and that the source's files did not change (26 checks, one run).
+Re-run 2026-11-01 on both drivers (Chrome 154, `LYRA_BROWSER_DRIVER=native` and
+`=playwright` with Playwright 1.63.0), now also checking that the named driver is the
+one that ran: 66 checks each, all passed.
 `scripts/measure_profile_import.py` imports a real profile into a throwaway data dir and
 compares what lyra's Chrome holds (CDP `Storage.getCookies`, on `about:blank`) with what
 was imported: on one `v10` profile, 25 cookies in the source, 4 session-only, 21
