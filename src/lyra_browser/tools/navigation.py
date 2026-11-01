@@ -17,6 +17,7 @@ from ..downloads import EVENT_WAIT_S
 from ..enforcement import refused_by_guard, refused_envelope, wait_unless_refused
 from ..origin import parse_origin
 from ..permission import Capability
+from ..profile_import import read_sidecar
 from .scope import released, require
 
 # How long a navigation waits, by Playwright's own names. ``domcontentloaded``
@@ -151,6 +152,17 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             "profile": getattr(ctx.session, "profile_mode", "shared"),
         }
         notes = []
+        imported = read_sidecar(ctx.config) if result["profile"] == "shared" else None
+        if imported:
+            result["imported_from"] = {
+                key: imported.get(key)
+                for key in ("browser", "profile", "name", "imported_at", "sites")
+            }
+            notes.append(
+                "This profile carries logins the user imported from their own browser "
+                f"profile {imported.get('name') or imported.get('profile')!r}: on those "
+                "sites you act as them."
+            )
         if result["profile"] == "instance":
             notes.append(
                 "Another lyra-browser server holds the saved profile, so this window "

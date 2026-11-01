@@ -952,8 +952,10 @@ name = "lyra-browser"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "fastmcp" },
     { name = "pydantic" },
+    { name = "secretstorage", marker = "sys_platform == 'linux'" },
 ]
 
 [package.optional-dependencies]
@@ -979,6 +981,7 @@ uat = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", marker = "extra == 'uat'", specifier = ">=1,<2" },
+    { name = "cryptography", specifier = ">=42" },
     { name = "fastmcp", specifier = ">=3.2,<4" },
     { name = "openai", marker = "extra == 'uat'", specifier = ">=1.60,<4" },
     { name = "patchright", marker = "extra == 'patchright'", specifier = ">=1.63,<2" },
@@ -990,6 +993,7 @@ requires-dist = [
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
     { name = "pyyaml", marker = "extra == 'uat'", specifier = ">=6,<7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
+    { name = "secretstorage", marker = "sys_platform == 'linux'", specifier = ">=3.3" },
 ]
 provides-extras = ["playwright", "dev", "patchright", "uat"]
 

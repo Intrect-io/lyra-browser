@@ -179,6 +179,22 @@ edit is itself a file write Claude Code asks you about.
 | `/lyra-browser:doctor` | Prints the plugin's environment, `uv`, the browser it would drive, the display, and whether the shared profile is held by another session. |
 | `/lyra-browser:install-browser` | Installs Playwright's bundled Chromium into the plugin's environment, for a machine with no Chrome or Edge. |
 
+### Your own Chrome logins
+
+The plugin's profile starts empty. To bring the logins of one of your own Chrome
+profiles into it, run the import yourself, in a terminal (Claude cannot):
+
+```bash
+"$CLAUDE_PLUGIN_DATA"/venv/bin/lyra-browser --client claude-code profile list
+"$CLAUDE_PLUGIN_DATA"/venv/bin/lyra-browser --client claude-code profile import --profile "Work"
+```
+
+`CLAUDE_PLUGIN_DATA` is set inside Claude Code; from a plain shell it is
+`~/.claude/plugins/data/<plugin id>/`, which `/lyra-browser:doctor` prints. Close the
+browser first (`close_browser`); run the same command again to sync. What moves,
+the `--sites` filter and how keyring-sealed cookies are handled are in the README,
+[Using your own Chrome logins](https://github.com/Intrect-io/lyra-browser#using-your-own-chrome-logins).
+
 ### Headless and `claude -p`
 
 In `claude -p` with `--permission-prompts none`, an elicitation is cancelled,
