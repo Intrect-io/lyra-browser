@@ -512,7 +512,8 @@ class PausedRequest:
 class PausedRoute:
     """The slice of a Playwright Route that ``NavigationGuard`` calls.
 
-    ``fulfill(status=204)`` is the guard's refusal: the page stays where it is.
+    ``abort("aborted")`` is the guard's refusal (``Fetch.failRequest`` with ``Aborted``):
+    the page stays where it is. Any other abort code would land on an error page.
     """
 
     def __init__(self, cdp: object, request_id: str) -> None:
@@ -530,8 +531,11 @@ class PausedRoute:
         )
         self.resolution = f"fulfill:{status}"
 
-    async def abort(self, *_a: object, **_k: object) -> None:
-        raise AssertionError("the guard answers 204 and never aborts")
+    async def abort(self, error_code: str = "failed") -> None:
+        if error_code != "aborted":
+            raise AssertionError(f"the guard refuses as ERR_ABORTED, never {error_code!r}")
+        await self._cdp.send("Fetch.failRequest", {"requestId": self._id, "errorReason": "Aborted"})
+        self.resolution = "abort:aborted"
 
 
 class FrameCache:
