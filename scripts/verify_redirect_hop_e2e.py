@@ -82,7 +82,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from verify_browser_e2e import REPO, build_tools  # noqa: E402
 from verify_browser_e2e import expect as base_expect  # noqa: E402
 
-from lyra_browser.enforcement import NavigationGuard, classify  # noqa: E402
+from lyra_browser.enforcement import REFUSAL_ERROR, NavigationGuard, classify  # noqa: E402
 from lyra_browser.origin import loggable_url, parse_origin  # noqa: E402
 from lyra_browser.permission import Capability  # noqa: E402
 
@@ -278,13 +278,13 @@ class RelayGuard(NavigationGuard):
             if intent is None:
                 await route.continue_()
             elif not self._judge(intent):
-                await route.fulfill(status=204)
+                await route.abort(REFUSAL_ERROR)
             else:
                 response = await route.fetch(max_redirects=0)
                 hop = self._next_hop(request, response)
                 judged = classify(hop) if hop is not None else None
                 if judged is not None and not self._judge(judged):
-                    await route.fulfill(status=204)
+                    await route.abort(REFUSAL_ERROR)
                 else:
                     await route.fulfill(response=response)
         except Exception as exc:  # noqa: BLE001 — as the real guard: a broken one refuses

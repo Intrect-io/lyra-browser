@@ -18,8 +18,8 @@ it. Over that connection it
 - receives ``Fetch.requestPaused`` for each document request *and each redirect
   hop*, builds the two things ``enforcement.classify`` reads (a request and a frame),
   and asks the one judgement, ``NavigationGuard.decide``, whether it may leave. The
-  answer is ``Fetch.continueRequest`` or a 204 ``Fetch.fulfillRequest``, as the route
-  adapter sends. Nothing here knows what a grant is;
+  answer is ``Fetch.continueRequest`` or ``Fetch.failRequest`` with ``Aborted``, as the
+  route adapter sends. Nothing here knows what a grant is;
 - turns the service worker off for every guarded page (``Network.setBypassServiceWorker``),
   because a navigation a service worker answers never reaches ``Fetch`` at all: a
   pre-registered worker for another origin served that origin's page with the guard
@@ -54,6 +54,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .cdp_socket import WebSocket, WebSocketError
+from .enforcement import CDP_REFUSAL_REASON
 
 ACTIVE_PORT_FILE = "DevToolsActivePort"
 _ENDPOINT_PATH = re.compile(r"/devtools/browser/[0-9A-Fa-f-]{8,64}")
@@ -666,10 +667,14 @@ class CdpGuard:
             self._vouch(params)
             self._fire(session, "Fetch.continueRequest", {"requestId": request_id})
         else:
-            # 204, never an abort: an abort sends the tab to chrome-error:// and the DOM
-            # the agent was working with is gone. The page stays where it was.
+            # Failed as ERR_ABORTED, the one failure Chrome shows no error page for: the
+            # page stays where it was. Not a 204, which Playwright 1.64 (reading the same
+            # tab over its own connection) takes for a finished navigation and then waits
+            # on forever; see ``enforcement.REFUSAL_ERROR``.
             self._fire(
-                session, "Fetch.fulfillRequest", {"requestId": request_id, "responseCode": 204}
+                session,
+                "Fetch.failRequest",
+                {"requestId": request_id, "errorReason": CDP_REFUSAL_REASON},
             )
 
     def _vouch(self, params: dict) -> None:

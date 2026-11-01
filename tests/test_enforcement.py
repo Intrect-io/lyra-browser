@@ -62,11 +62,11 @@ class FakeRoute:
     async def continue_(self) -> None:
         self.calls.append(("continue",))
 
-    async def fulfill(self, **kwargs) -> None:
+    async def fulfill(self, **kwargs) -> None:  # the guard no longer answers with a 204
         self.calls.append(("fulfill", kwargs.get("status")))
 
-    async def abort(self, *a, **k) -> None:  # must never be used
-        self.calls.append(("abort",))
+    async def abort(self, error_code: str = "failed") -> None:
+        self.calls.append(("abort", error_code))
 
 
 @pytest.fixture
@@ -165,14 +165,15 @@ async def test_observe_does_not_spend_a_single_use_grant(make_guard):
 # --------------------------------------------------------------------------
 
 
-async def test_enforce_refuses_with_204_not_abort(make_guard):
-    """abort() sends the page to chrome-error:// and the DOM disappears."""
+async def test_enforce_refuses_with_err_aborted_never_another_error_or_a_204(make_guard):
+    """Any abort code but ``aborted`` sends the page to chrome-error:// and the DOM
+    disappears; a 204 strands the tab on Playwright 1.64 (``REFUSAL_ERROR``)."""
     guard, _, cfg = make_guard("enforce")
     route = FakeRoute()
 
     await guard(route, FakeRequest(url="https://other.example/"))
 
-    assert route.calls == [("fulfill", 204)]
+    assert route.calls == [("abort", "aborted")]
     assert _entries(cfg)[-1]["status"] == "denied"
 
 
@@ -214,7 +215,7 @@ async def test_grant_from_one_page_does_not_license_another(make_guard):
 
     await guard(route, FakeRequest(url="https://example.com/x", frame_url="https://evil.example/"))
 
-    assert route.calls == [("fulfill", 204)]
+    assert route.calls == [("abort", "aborted")]
 
 
 # --------------------------------------------------------------------------
@@ -241,7 +242,7 @@ async def test_guard_failure_fails_closed_in_enforce(make_guard, monkeypatch):
 
     await guard(route, FakeRequest())
 
-    assert route.calls == [("fulfill", 204)]
+    assert route.calls == [("abort", "aborted")]
     assert _entries(cfg)[-1]["status"] == "guard_error"
 
 
@@ -254,7 +255,7 @@ async def test_guard_never_raises_out_of_the_handler(make_guard, monkeypatch):
     )
 
     class BrokenRoute(FakeRoute):
-        async def fulfill(self, **kwargs):
+        async def abort(self, error_code: str = "failed"):
             raise RuntimeError("route already handled")
 
     await guard(BrokenRoute(), FakeRequest())  # must not raise
@@ -386,7 +387,7 @@ async def test_the_route_and_decide_reach_the_same_verdict_and_leave_the_same_tr
             route = FakeRoute()
             await guard(route, request)
             allowed = route.calls == [("continue",)]
-            assert route.calls in ([("continue",)], [("fulfill", 204)])
+            assert route.calls in ([("continue",)], [("abort", "aborted")])
         else:
             allowed = guard.decide(request)
         rows = [
@@ -526,7 +527,7 @@ async def test_autonomous_still_refuses_a_denied_origin(make_guard):
 
     await guard(route, FakeRequest(url="https://other.example/"))
 
-    assert route.calls == [("fulfill", 204)]
+    assert route.calls == [("abort", "aborted")]
 
 
 async def test_autonomous_does_not_license_an_undeclared_send(make_guard):
@@ -536,7 +537,7 @@ async def test_autonomous_does_not_license_an_undeclared_send(make_guard):
 
     await guard(route, FakeRequest(method="POST"))
 
-    assert route.calls == [("fulfill", 204)]
+    assert route.calls == [("abort", "aborted")]
 
 
 async def test_closed_default_still_refuses_a_new_site(make_guard):
@@ -545,4 +546,4 @@ async def test_closed_default_still_refuses_a_new_site(make_guard):
 
     await guard(route, FakeRequest(url="https://other.example/"))
 
-    assert route.calls == [("fulfill", 204)]
+    assert route.calls == [("abort", "aborted")]

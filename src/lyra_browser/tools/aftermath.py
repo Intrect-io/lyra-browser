@@ -3,8 +3,8 @@
 ``click`` answers when the driver reports the click done. Two things can still be
 true of that moment, and the agent's next move depends on them:
 
-- **The guard refused a navigation the action caused.** The 204 leaves the tab where
-  it was, so a reply that says ``ok`` with the same ``url`` reads as a click that did
+- **The guard refused a navigation the action caused.** The refusal leaves the tab
+  where it was, so a reply that says ``ok`` with the same ``url`` reads as a click that did
   nothing — and the audit trail, which the agent does not read, is the only place that
   says why. The reply is ``blocked_by_policy`` instead, with the fields it already
   had (``matches``, ``clicked``, ``dialogs``) kept.

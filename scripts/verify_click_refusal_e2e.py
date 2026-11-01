@@ -3,7 +3,7 @@
 
 Found by ``verify_realsites.py`` on MDN: a ``click`` on a link inside an ad frame answered
 ``{"status": "ok"}`` although the NavigationGuard had refused the navigation it caused (the
-audit read ``denied navigate <url> (initiator (unknown))``). The 204 leaves the tab where it
+audit read ``denied navigate <url> (initiator (unknown))``). The refusal leaves the tab where it
 was, so the reply looked like a click that did nothing, with no word of why. And a click that
 opened a tab reported the opener's URL as if nothing had happened.
 

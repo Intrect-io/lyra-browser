@@ -198,7 +198,7 @@ many elements the selector hit — the first is clicked) and `clicked`
 done, and two things can still be true of that moment:
 
 - **The guard refused a navigation the action caused** (a link to a site no approval
-  covers, a form sent without `submits=true`, a page that redirected itself). The 204
+  covers, a form sent without `submits=true`, a page that redirected itself). The refusal
   leaves the tab where it was, so the reply used to read `ok` with the same `url` and
   the agent had no idea why nothing happened — the audit trail was the only account.
   It is now `blocked_by_policy` with `url` (where the tab stands), a `hint` and, for a
@@ -444,8 +444,12 @@ re-asked. Sending a form and leaving for another site are separate decisions and
 are asked — declare them with `submits=true` (`submit=true` on `type_text`).
 
 **Enforcement** watches outgoing navigations at the request, so it catches a
-submission or an escape whatever produced it. A refusal answers with HTTP 204
-rather than aborting, which leaves the page standing so the agent can recover.
+submission or an escape whatever produced it. A refusal fails the request as
+`net::ERR_ABORTED`, the one network error Chrome never turns into an error page, so the
+page stays standing and the agent can recover. (It used to answer with HTTP 204, which
+Chrome also ends as `ERR_ABORTED`; Playwright 1.64 reads a 204 document as a finished
+navigation and then waits on it until every later action times out — measured
+2026-11-01, playwright 1.64.1 vs 1.63.0, Chrome 154.)
 URLs with no host — `file:`, `data:`, `javascript:` — are never "the same site"
 and are asked every time. Where the guard stands — Playwright's route, or a second
 DevTools connection that also sees redirect hops — is a choice, see
@@ -469,7 +473,7 @@ Where the line falls, measured rather than asserted:
   it was being sent and ask for it.
   `navigate`, `go_back` and `reload_page` answer it as `blocked_by_policy`, with the
   `url` the tab still stands on, about a second after the refusal — also when the
-  page did it before it finished loading. The 204 commits nothing, so the driver
+  page did it before it finished loading. The refusal commits nothing, so the driver
   would otherwise wait out its own 30 s timeout for a navigation that is gone
   (`scripts/verify_scriptredirect_e2e.py`; neverssl.com does exactly this). `click`,
   `type_text`, `press_key` and `hover` answer it too when the navigation was theirs
@@ -655,8 +659,9 @@ auto-attaches to every page and out-of-process iframe at *browser* level with
 `Fetch.enable` is in place on it (a session made through Playwright after the tab
 exists cannot promise that: popups' first requests and cross-site iframe requests
 escaped in the earlier probe). Each paused request becomes the two objects
-`classify` reads, goes through `decide`, and is answered `Fetch.continueRequest` or a
-204 `Fulfill` — never an abort. Nothing is asked of the page while a request is
+`classify` reads, goes through `decide`, and is answered `Fetch.continueRequest` or
+`Fetch.failRequest` with `Aborted` — never another error reason, which would show an
+error page. Nothing is asked of the page while a request is
 paused (its renderer does not answer then).
 
 **Redirect hops.** Each hop is its own `Fetch.requestPaused`, judged as the

@@ -607,6 +607,9 @@ class FakeRoute:
     async def fulfill(self, **kwargs) -> None:
         self.calls.append(("fulfill", kwargs.get("status")))
 
+    async def abort(self, error_code: str = "failed") -> None:
+        self.calls.append(("abort", error_code))
+
 
 class FakeNavigation:
     """The request the browser makes once a tool has been let through."""
@@ -880,7 +883,7 @@ async def test_navigating_to_a_trusted_site_needs_no_approval_and_the_guard_agre
     await ctx.guard(listed, FakeNavigation("https://kvraudio.com/forum", "https://start.example/"))
     await ctx.guard(unlisted, FakeNavigation("https://evil.example/", "https://start.example/"))
     assert listed.calls == ["continue"]
-    assert unlisted.calls == [("fulfill", 204)], "a site nobody listed is still stopped"
+    assert unlisted.calls == [("abort", "aborted")], "a site nobody listed is still stopped"
 
 
 async def test_a_trusted_site_buys_being_on_it_and_not_sending_from_it(
@@ -1065,7 +1068,7 @@ async def test_the_guard_lets_a_trusted_arrival_through_with_no_navigate_call(
     await ctx.guard(other, FakeNavigation("https://evil.example/", "https://api.example.com/"))
 
     assert hop.calls == ["continue"]
-    assert other.calls == [("fulfill", 204)], "a site nobody listed is still stopped"
+    assert other.calls == [("abort", "aborted")], "a site nobody listed is still stopped"
     assert not declining_client.prompts
     rows = [json.loads(x) for x in ctx.config.audit_path.read_text().splitlines() if x.strip()]
     allowed = [r for r in rows if r.get("origin") == "https://app.example.com"]
@@ -1084,8 +1087,10 @@ async def test_the_guard_does_not_let_the_roaming_list_pay_for_a_submission(make
     )
     await ctx.guard(from_unlisted, FakePost("https://app.example.com/pay", "https://evil.example/"))
 
-    assert from_listed.calls == [("fulfill", 204)], "listing a site never approved sending from it"
-    assert from_unlisted.calls == [("fulfill", 204)]
+    assert from_listed.calls == [("abort", "aborted")], (
+        "listing a site never approved sending from it"
+    )
+    assert from_unlisted.calls == [("abort", "aborted")]
 
 
 async def test_the_guard_does_not_honour_the_list_when_asking_is_off(make_ctx):

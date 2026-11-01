@@ -2,7 +2,7 @@
 """A page that sends itself away while it is still loading must not strand the tool.
 
 Found by ``verify_realsites.py``: neverssl.com runs ``location.href = '<random>.neverssl.com'``
-in an inline script, before DOMContentLoaded. The guard refuses that with a 204, which
+in an inline script, before DOMContentLoaded. The guard refuses that (as ERR_ABORTED), which
 commits nothing, and ``goto`` went on waiting for the navigation that was gone until its own
 timeout (30s) and then raised a bare TimeoutError - not the ``blocked_by_policy`` envelope the
 model is told to expect. ``reload_page``, ``go_back`` and a form the page posts on its own
