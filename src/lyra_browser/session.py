@@ -576,8 +576,10 @@ class BrowserSession:
 
     async def _start_playwright(self) -> Playwright:
         """The one place a driver is imported, so tests can stand in for it."""
+        # The channels a launch will try, an imported profile's pin included, so ``auto``
+        # does not settle on native for a browser the launch will then refuse to use.
         name, async_playwright = load_driver(
-            self._config.driver, channels=self._config.browser_candidates()
+            self._config.driver, channels=pinned_candidates(self._config)
         )
         self._active_driver = name
         return await async_playwright().start()

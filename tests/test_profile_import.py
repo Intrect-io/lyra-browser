@@ -421,6 +421,30 @@ def test_an_operator_channel_still_wins_over_the_pin(tmp_path):
     assert pinned_candidates(cfg)[0] == "msedge"
 
 
+async def test_the_driver_choice_looks_for_the_pinned_browser_too(tmp_path, monkeypatch):
+    """``auto`` picks native only when native can find a browser; with a pin, that
+    browser must be the pinned one, or native is chosen for a launch that then refuses."""
+    from lyra_browser import session as session_mod
+    from lyra_browser.session import BrowserSession
+
+    cfg = make_config(tmp_path)
+    cfg.data_dir.mkdir(parents=True)
+    (cfg.data_dir / SIDECAR_NAME).write_text(json.dumps({"browser": "msedge"}))
+    seen: list = []
+
+    class _Started:
+        async def start(self):
+            return object()
+
+    def fake_load_driver(preference, channels=None):
+        seen.append(list(channels))
+        return "native", _Started
+
+    monkeypatch.setattr(session_mod, "load_driver", fake_load_driver)
+    await BrowserSession(cfg)._start_playwright()
+    assert seen == [["msedge"]]
+
+
 async def test_open_browser_says_the_profile_acts_as_the_user(make_ctx, tools_of):
     ctx = make_ctx()
     ctx.session.profile_mode = "shared"

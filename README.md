@@ -869,8 +869,9 @@ backup API; LevelDB directories are copied file by file (without `LOCK`) and cop
 again if they changed meanwhile, so a running browser's last few writes may be
 missing.
 
-**Cookie encryption (Linux).** Playwright launches Chrome with
-`--password-store=basic`, so lyra's cookies are sealed `v10`, with Chrome's fixed key.
+**Cookie encryption (Linux).** Both drivers launch Chrome with
+`--password-store=basic` (the `native` driver copies Playwright's switches), so lyra's
+cookies are sealed `v10`, with Chrome's fixed key.
 A Chrome that found a desktop keyring seals them `v11`, with a secret in that
 keyring; copied as they are they would never open in lyra. The import fetches that
 secret from the Secret Service (D-Bus), opens each cookie and seals it again as

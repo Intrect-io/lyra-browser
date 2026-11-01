@@ -7,8 +7,9 @@ on the command line, and re-running the command is how the two stay in sync.
 What moves, per component (and nothing else):
 
 - ``Cookies`` (SQLite): row by row. Every cookie is decrypted with the source's
-  key and encrypted again with the key lyra's Chrome reads. Playwright launches
-  Chrome with ``--password-store=basic``, so lyra's cookies are ``v10`` (a fixed,
+  key and encrypted again with the key lyra's Chrome reads. Both drivers launch
+  Chrome with ``--password-store=basic --use-mock-keychain`` (``native.launcher``
+  copies Playwright's switches), so lyra's cookies are ``v10`` (a fixed,
   public key), while a Chrome that found a desktop keyring writes ``v11`` under a
   secret only that keyring knows. A ``v11`` cookie copied as-is never decrypts in
   lyra, so it is opened here (Secret Service over D-Bus) and written back as
