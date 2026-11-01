@@ -273,7 +273,7 @@ def test_a_page_moving_itself_to_another_host_is_a_departure():
     All nine were one site redirecting itself to a random subdomain. It is not a
     false positive: the guard cannot tell a cache-busting bounce from a hostile
     page escaping, and treating a different host as "staying put" would empty
-    NAVIGATE of meaning. The refusal is recoverable — 204 leaves the original
+    NAVIGATE of meaning. The refusal is recoverable — ERR_ABORTED leaves the original
     document standing and the audit names the destination — so the agent can
     read where it was sent and ask for it.
     """
@@ -357,7 +357,7 @@ async def test_a_navigation_the_guard_did_refuse_comes_back_as_an_envelope(
     make_ctx, tools_of, page
 ):
     async def explode(url, wait_until=None):
-        ctx.guard.refusals += 1  # what the route handler does on a 204
+        ctx.guard.refusals += 1  # what the route handler does on a refusal
         raise RuntimeError("Page.goto: net::ERR_ABORTED at https://start.example/next")
 
     ctx = make_ctx()
@@ -464,8 +464,8 @@ async def test_a_guard_that_refuses_must_also_spend(make_ctx):
         async def continue_(self) -> None:
             self.calls.append("continue")
 
-        async def fulfill(self, **kwargs) -> None:
-            self.calls.append(f"fulfill {kwargs.get('status')}")
+        async def abort(self, error_code: str = "failed") -> None:
+            self.calls.append(f"abort {error_code}")
 
     def post() -> FakeRequest:
         return FakeRequest(
@@ -477,7 +477,7 @@ async def test_a_guard_that_refuses_must_also_spend(make_ctx):
     await guard(second, post())
 
     assert first.calls == ["continue"], "the approval pays for one submission"
-    assert second.calls == ["fulfill 204"], "and a mode that refuses must also have spent it"
+    assert second.calls == ["abort aborted"], "and a mode that refuses must also have spent it"
 
 
 def test_two_approved_submissions_do_not_share_one_use():
@@ -562,8 +562,8 @@ async def test_a_guard_that_crashed_is_not_reported_as_a_policy_refusal(make_ctx
         async def continue_(self):
             self.calls.append("continue")
 
-        async def fulfill(self, **kw):
-            self.calls.append(("fulfill", kw.get("status")))
+        async def abort(self, error_code="failed"):
+            self.calls.append(("abort", error_code))
 
     ctx = make_ctx()
     guard, route = ctx.guard, ExplodingRoute()
@@ -571,7 +571,7 @@ async def test_a_guard_that_crashed_is_not_reported_as_a_policy_refusal(make_ctx
 
     await guard._fail_closed(route, RuntimeError("guard is broken"))
 
-    assert route.calls == [("fulfill", 204)], "it still fails closed"
+    assert route.calls == [("abort", "aborted")], "it still fails closed"
     assert guard.refusals == before, "but it is not a refusal for lack of approval"
 
 
@@ -727,7 +727,7 @@ async def test_the_agent_is_still_judged_while_the_user_holds_the_session(make_c
 
     await ctx.guard(route, _Nav("https://bank.example/2fa", "https://bank.example/login"))
 
-    assert route.calls == [("fulfill", 204)]
+    assert route.calls == [("abort", "aborted")]
 
 
 class _Route:
@@ -737,8 +737,8 @@ class _Route:
     async def continue_(self) -> None:
         self.calls.append("continue")
 
-    async def fulfill(self, **kwargs) -> None:
-        self.calls.append(("fulfill", kwargs.get("status")))
+    async def abort(self, error_code: str = "failed") -> None:
+        self.calls.append(("abort", error_code))
 
 
 class _Nav:

@@ -60,6 +60,20 @@ _MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 Mode = Literal["observe", "enforce"]
 
+# How a refused document request is answered: failed with net::ERR_ABORTED, the error
+# Chrome reports for a navigation that was cancelled. It is the one failure Chrome never
+# turns into an error page, so the document the agent was working with stays standing
+# (any other code, the default ``abort()`` included, lands the tab on chrome-error://).
+# The guard used to answer with a 204 for the same effect — Chrome ends a 204 navigation
+# with ERR_ABORTED too — but Playwright 1.64 reports a document request that got a 204
+# as *finished*, not failed, so the frame's pending navigation is never cleared and every
+# later action on the tab waits for it until it times out (measured 2026-11-01:
+# playwright 1.64.1, Chrome 154; 1.63.0 cleared it). Failing the request leaves no
+# response for a driver to misread. ``REFUSAL_ERROR`` is Playwright's name for it,
+# ``CDP_REFUSAL_REASON`` the DevTools one (``Fetch.failRequest``).
+REFUSAL_ERROR = "aborted"
+CDP_REFUSAL_REASON = "Aborted"
+
 # How long a navigation gets to finish by itself once the guard has refused something
 # while it ran, and how often that is looked at. See ``wait_unless_refused``.
 REFUSAL_GRACE_S = 1.0
@@ -132,7 +146,7 @@ def refused_by_guard(exc: Exception) -> bool:
     reports. Callers pair this with the guard's own refusal count so a download
     is never announced as a policy block.
 
-    A ``TimeoutError`` is the other shape a refusal takes: the 204 commits
+    A ``TimeoutError`` is the other shape a refusal takes: the refusal commits
     nothing, so a call whose page sent itself away while loading is left waiting
     for a navigation that no longer exists (see ``wait_unless_refused``). Matched
     by name, since playwright and patchright each define their own.
@@ -161,7 +175,7 @@ async def wait_unless_refused(
 ) -> Any:
     """Await a navigation the driver is performing, but not one the guard has stranded.
 
-    The guard refuses with a 204, which commits nothing. When a page sends itself
+    The guard's refusal (``ERR_ABORTED``) commits nothing. When a page sends itself
     elsewhere while its own load is still running — an inline ``location.href = ...``
     — ``goto`` keeps waiting for the navigation that has just ceased to exist and
     gives up only at its own timeout: thirty seconds for a refusal made in
@@ -411,7 +425,7 @@ class NavigationGuard:
         return self._mode
 
     def decide(self, request: Any) -> bool:
-        """Judge one request: ``True`` lets it through, ``False`` refuses it with a 204.
+        """Judge one request: ``True`` lets it through, ``False`` refuses it (``ERR_ABORTED``).
 
         Everything the guard does about a request happens here and in ``_judge`` and
         nowhere else — classify, takeover, grant check and spend, audit row, refusal
@@ -438,17 +452,12 @@ class NavigationGuard:
         self._audit.record("navigation", status=status, detail=detail or None)
 
     async def __call__(self, route: Any, request: Any) -> None:
-        """Let a request through, or answer it with 204 — never abort.
-
-        ``abort()`` sends the page to ``chrome-error://`` and the DOM the agent
-        was working with disappears. 204 leaves the document standing, so a
-        refusal is recoverable instead of destructive.
-        """
+        """Let a request through, or refuse it with ``ERR_ABORTED`` (see ``REFUSAL_ERROR``)."""
         try:
             if self.decide(request):
                 await route.continue_()
             else:
-                await route.fulfill(status=204)
+                await route.abort(REFUSAL_ERROR)
         except Exception as exc:  # noqa: BLE001 — a broken guard must not open the gate
             await self._fail_closed(route, exc)
 
@@ -585,7 +594,7 @@ class NavigationGuard:
             if allow:
                 await route.continue_()
             else:
-                await route.fulfill(status=204)
+                await route.abort(REFUSAL_ERROR)
         except Exception:  # noqa: BLE001 — already handled elsewhere; nothing left to do
             pass
 
@@ -652,7 +661,7 @@ class NavigationGuard:
         """Cancel the load a refused hop belongs to; record whether that was in time.
 
         A CDP ``Page.stopLoading`` on a session opened for the purpose. That leaves the
-        document standing, as the route's 204 does; it is not interception, so the
+        document standing, as the route's refusal does; it is not interception, so the
         popup-first-request hole of per-tab sessions does not apply. ``window.stop()``
         cannot do it: the page's own context does not answer while a main-frame navigation
         is pending (measured), so it only returns once the hop has committed.

@@ -428,13 +428,13 @@ class Rig:
         ]
 
     def verdict(self, request_id: str, session: str | None = None) -> str:
-        """``continue`` or ``refuse`` (a 204), after checking it was answered exactly once."""
+        """``continue`` or ``refuse`` (failed ``Aborted``), after checking it was answered once."""
         [cmd] = self.answers(request_id, session)
         if cmd.method == "Fetch.continueRequest":
             assert cmd.params == {"requestId": request_id}
             return "continue"
-        assert cmd.method == "Fetch.fulfillRequest", cmd.method
-        assert cmd.params == {"requestId": request_id, "responseCode": 204}
+        assert cmd.method == "Fetch.failRequest", cmd.method
+        assert cmd.params == {"requestId": request_id, "errorReason": "Aborted"}
         return "refuse"
 
 
@@ -535,19 +535,20 @@ async def test_a_redirect_hop_is_vouched_for_its_own_url(page_rig):
     assert guard.vouched("r1", "https://a.example/start")
 
 
-async def test_a_refused_request_is_answered_with_a_204_and_never_failed_or_aborted(page_rig):
+async def test_a_refused_request_is_failed_as_aborted_never_another_error_or_a_204(page_rig):
     page_rig.chrome.paused("S1", "r1", "https://b.example/elsewhere")
     await page_rig.chrome.settle()
 
     [answer] = page_rig.answers("r1")
+    # ``Aborted`` is the one failure Chrome shows no error page for; any other reason sends
+    # the tab to chrome-error:// and the page the agent works on is gone. A 204 would leave
+    # it standing too, but Playwright 1.64 then waits on that navigation forever.
     assert (answer.session, answer.method, answer.params) == (
         "S1",
-        "Fetch.fulfillRequest",
-        {"requestId": "r1", "responseCode": 204},
+        "Fetch.failRequest",
+        {"requestId": "r1", "errorReason": "Aborted"},
     )
-    # A failed request sends the tab to chrome-error:// and the page the agent works on is gone.
-    assert not [c for c in page_rig.chrome.commands if "fail" in c.method.lower()]
-    assert not [c for c in page_rig.chrome.commands if "abort" in c.method.lower()]
+    assert not [c for c in page_rig.chrome.commands if c.method == "Fetch.fulfillRequest"]
     assert page_rig.navigation.refusals == 1
     assert page_rig.audit()[-1]["status"] == "denied"
 
@@ -762,8 +763,8 @@ class FakeRoute:
     async def continue_(self) -> None:
         self.calls.append(("continue",))
 
-    async def fulfill(self, **kwargs) -> None:
-        self.calls.append(("fulfill", kwargs.get("status")))
+    async def abort(self, error_code: str = "failed") -> None:
+        self.calls.append(("abort", error_code))
 
 
 @dataclass(frozen=True)
@@ -851,7 +852,7 @@ async def test_a_paused_request_is_judged_exactly_as_the_playwright_route_judges
     request = playwright_request(case)
     await route_guard(route, request)
     route_verdict = "continue" if route.calls == [("continue",)] else "refuse"
-    assert route.calls in ([("continue",)], [("fulfill", 204)])
+    assert route.calls in ([("continue",)], [("abort", "aborted")])
 
     # The same request, described the way Chrome describes it.
     rig = make_rig()

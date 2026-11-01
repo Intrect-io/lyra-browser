@@ -917,8 +917,10 @@ class NativePage:
         ``keep`` gets a ``Fetch.requestPaused`` description (``url``,
         ``resourceType``, ``request.method``…) and returns whether the request may
         go. A request it refuses is answered ``204`` — the page stays where it was,
-        rather than landing on ``chrome-error://`` — which is how ``cdp_guard``
-        refuses too. Sub-resource requests and other frames are let through
+        rather than landing on ``chrome-error://``. (``cdp_guard`` fails its refusals
+        with ``ERR_ABORTED`` instead, because Playwright 1.64 strands a tab whose
+        navigation got a 204; no Playwright reads this tab, so the 204 is safe here.)
+        Sub-resource requests and other frames are let through
         untouched: this is for a caller that needs a different policy from the
         guard (VEGA's ``web_fetch`` pins one origin), not a navigation guard.
 

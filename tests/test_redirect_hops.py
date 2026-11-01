@@ -551,7 +551,7 @@ async def test_a_refusal_remembers_whether_it_was_a_redirect(make_guard):
         frame = FakeFrame(FakePage(), PAGE)
 
     class Route:
-        async def fulfill(self, **kwargs: object) -> None:
+        async def abort(self, error_code: str = "failed") -> None:
             pass
 
     await guard(Route(), FirstRequest())
