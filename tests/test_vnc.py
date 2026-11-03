@@ -427,3 +427,14 @@ async def test_native_launcher_hands_chrome_the_env(monkeypatch, tmp_path, env):
         await launcher.launch(options)
 
     assert seen["env"] == env
+
+
+def test_a_remote_display_is_left_to_chrome(no_display, monkeypatch):
+    monkeypatch.setenv("LYRA_BROWSER_DISPLAY", "otherhost:0")
+    cfg = Config.from_env(client="claude-code")
+    session = BrowserSession(cfg)
+
+    session._settle_display()
+
+    assert cfg.headless is False and session.display_lost is None
+    assert launch_kwargs(cfg, None)["env"]["DISPLAY"] == "otherhost:0"

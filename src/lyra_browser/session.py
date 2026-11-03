@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .cdp_guard import EXIT_GRACE_S, CdpGuard, CdpGuardError, prepare_profile
-from .config import Config, display_alive
+from .config import Config, display_alive, display_number
 from .dialogs import DialogHandler
 from .profile_import import pinned_candidates
 
@@ -759,7 +759,10 @@ class BrowserSession:
         if not self._wants_display:
             return
         if alive is None:
-            alive = display_alive(self._config.display or "")
+            display = self._config.display or ""
+            # A remote display has no local socket to judge by: let Chrome try it, and
+            # its own "cannot open display" is the fallback (_launch_claimed).
+            alive = display_number(display) is None or display_alive(display)
         self._config.headless = not alive
         self.display_lost = None if alive else self._config.display
 
