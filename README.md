@@ -951,7 +951,9 @@ throwaway keyring.
 | `LYRA_BROWSER_CLIENT` | detected | `generic`, `hermes`, `remote` or `claude-code` (also `--client`). Picks default paths, window mode and how captures reach the model — never permissions. `remote` is a server nobody sits at: headless, and `screenshot`/`read_image` attach the PNG as an MCP image. `claude-code` is the Claude Code plugin: a window where one can open, the same attached image, data beside `generic`'s. Detected from `HERMES_HOME` → hermes; otherwise `generic` (`claude-code` is never detected: the plugin passes the flag). |
 | `LYRA_BROWSER_DATA_DIR` | — | Base data dir (profile + audit). Overrides everything. |
 | `HERMES_HOME` | `~/.hermes` | hermes: data goes to `$HERMES_HOME/browser`. |
-| `LYRA_BROWSER_HEADLESS` | auto | Run without a visible window (see Headless mode). Unset: headless for hermes and remote, and on Linux with no `DISPLAY`/`WAYLAND_DISPLAY`; otherwise a window. |
+| `LYRA_BROWSER_HEADLESS` | auto | Run without a visible window (see Headless mode). Unset: headless for hermes and remote, and on Linux with no `DISPLAY`/`WAYLAND_DISPLAY` unless a persistent VNC display is up (see below); otherwise a window. |
+| `LYRA_BROWSER_DISPLAY` | unset | X display the window opens on instead of the inherited one, e.g. `:98`. Unset: the persistent VNC display that `lyra-browser vnc install` keeps up, for `generic` and `claude-code` on a Linux host with no display of its own, while its X socket exists. |
+| `LYRA_BROWSER_VNC_DIR` | `~/.config/lyra-browser/vnc` | Where `vnc install` keeps its sidecar (`vnc.json`) and password file. Host-wide, not per client. |
 | `LYRA_BROWSER_VIEWPORT` | `1280x800` | `WIDTHxHEIGHT` of the page (`390x844` for a phone layout). Headless uses it as the emulated viewport; headful as the window size. Anything unreadable falls back to the default. |
 | `LYRA_BROWSER_PROXY` | unset | Route the browser through a proxy, e.g. `socks5://100.x.y.z:1080`. For UAT runs that must not share the operator's egress IP, since per-IP rate limits, quotas and IP-based analytics exclusion all key on it. Unset means a direct connection. |
 | `LYRA_BROWSER_REQUIRE_APPROVAL` | `true` | Ask before risky actions. `false` sets the consent channel to `off`. |
@@ -1003,7 +1005,53 @@ lyra-browser --no-headless   # force a window even if the env says otherwise
 Unset, the mode follows the client and the host: `--client hermes` is headless
 (Hermes reaches the user over chat and gives its servers no display), and so is
 any Linux process with neither `DISPLAY` nor `WAYLAND_DISPLAY` — launching a
-window there would crash, headless is a working session that says so.
+window there would crash, headless is a working session that says so — unless
+the host keeps a persistent VNC display (next section).
+
+### A persistent VNC display for a host with no screen
+
+On a server you reach over SSH, lyra would otherwise always be headless. One
+command keeps a display up that you watch from a VNC viewer:
+
+```bash
+lyra-browser vnc install                          # :98, 127.0.0.1:5902, 1920x1080x24
+lyra-browser vnc install --listen 100.64.0.10     # e.g. a Tailscale or WireGuard address
+lyra-browser vnc status                           # units, X socket, does RFB answer
+lyra-browser vnc password                         # print the password again
+lyra-browser vnc reset-password [--stdin]         # the only thing that changes it
+lyra-browser vnc uninstall                        # stop, remove the units, keep the password
+```
+
+`install` writes two systemd user units — `lyra-xvfb.service` (`Xvfb :98
+-nolisten tcp`) and `lyra-x11vnc.service`, bound to it, waiting for its X socket
+before it starts, and restarted with it — enables and starts them, and records
+display, port and listen address in `~/.config/lyra-browser/vnc/vnc.json`. The
+password is generated once (8 characters, the most VNC authentication uses), shown
+once, and kept at mode 0600 in `passwd` next to it; re-running `install` with other
+flags keeps it. x11vnc reads it with `-passwdfile read:`, so it is never on a command
+line and a reset applies to the next viewer without a restart. Without lingering
+(`loginctl enable-linger $USER`) the units stop when you log out; `install` warns.
+
+The server never starts or stops these units. A `generic` or `claude-code` server
+with no display of its own opens its window there whenever the X socket exists —
+headful, `attended=true` — and `open_browser` answers with `watch: {"vnc":
+"<listen>:<port>", "display": ":98"}` and a note for the agent to give the user that
+address. The password never reaches the model. Each launch judges the display again:
+if the X server is gone, the session opens headless and `open_browser` adds
+`display_lost`. Hermes and `remote` stay headless, and an inherited `DISPLAY` (a
+desktop someone is looking at) always wins.
+
+RFB is unencrypted and the password is short: the default listen address is
+loopback (reach it with `ssh -L 5902:127.0.0.1:5902 host`), and a private-network
+address is the alternative. Never listen on `0.0.0.0` on a network you do not trust.
+Measured by `scripts/verify_vnc_e2e.py` (2026-11-03, Xvfb 21.1.12, x11vnc 0.9.16,
+Google Chrome 154.0.8037.57; one full pass each with the `native` driver and with
+Playwright 1.63.0, `--driver`): with `DISPLAY` and
+`WAYLAND_DISPLAY` removed, `open_browser` reports `attended=true` and the address; a
+real RFB client refuses a wrong password, and with the stored one sees the loaded page
+on the framebuffer. With the X server killed (its socket left behind, so only Chrome's
+"Missing X server" tells) and with it stopped cleanly, the next launch is headless with
+`display_lost` rather than an error.
 
 Headless does not merely hide the window — it means **nobody is watching**. The
 collaboration tools have no human to reach, so they refuse with an `unattended`
@@ -1085,6 +1133,8 @@ example `python scripts/verify_browser_e2e.py --headless-only`, or headful under
 `xvfb-run -a`. `.github/workflows/browser-gates.yml` runs thirteen of them nightly
 (and on demand) for both drivers, on ubuntu with Xvfb; a red nightly run is the signal
 that a driver change regressed something the fake-page unit suite cannot see.
+`python scripts/verify_vnc_e2e.py` is the persistent-display gate: its own Xvfb and
+x11vnc on a free display and loopback port, never the host's install.
 
 - **CDP guard gate** — `python scripts/verify_cdp_guard_e2e.py` (both modes, `--driver`)
   re-runs the browser, script-redirect and tabs gates on the `cdp` backend, then checks

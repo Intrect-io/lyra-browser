@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .cdp_guard import EXIT_GRACE_S, CdpGuard, CdpGuardError, prepare_profile
-from .config import Config
+from .config import Config, display_alive
 from .dialogs import DialogHandler
 from .profile_import import pinned_candidates
 
@@ -308,6 +308,13 @@ def launch_kwargs(
         kwargs["chromium_sandbox"] = False
     if config.proxy:
         kwargs["proxy"] = {"server": config.proxy}
+    if config.display and not config.headless:
+        # Playwright's ``env`` replaces the browser's whole environment, so start
+        # from ours. Wayland goes: Chrome prefers it over X, and the window must
+        # land on the display the user watches.
+        env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
+        env["DISPLAY"] = config.display
+        kwargs["env"] = env
     return kwargs
 
 
@@ -391,6 +398,15 @@ class GuardLost(Exception):
 def _is_missing_browser(exc: Exception) -> bool:
     msg = str(exc).lower()
     return any(marker in msg for marker in _MISSING_MARKERS)
+
+
+# What Chrome prints when it cannot reach the X server it was given.
+_NO_X_MARKERS = ("missing x server", "cannot open display", "platform failed to initialize")
+
+
+def _is_missing_x_server(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _NO_X_MARKERS)
 
 
 # Substrings Playwright uses when the thing it was talking to is gone — a page, a
@@ -505,6 +521,13 @@ def sweep_dead_instances(root: Path, keep_pid: int) -> None:
 class BrowserSession:
     def __init__(self, config: Config) -> None:
         self._config = config
+        # A window was meant to open on a persistent display (``vnc install``). The
+        # display is judged again at every launch: an X server that went away since
+        # the server started means headless for that launch, and one that came back
+        # means a window again (see _settle_display).
+        self._wants_display = bool(config.display) and not config.headless
+        # Set when a launch fell back to headless because that display was gone.
+        self.display_lost: str | None = None
         self._pw: Playwright | None = None
         self._context: BrowserContext | None = None
         self._page: Page | None = None
@@ -731,7 +754,17 @@ class BrowserSession:
                 self._release_profile()
             raise
 
+    def _settle_display(self, alive: bool | None = None) -> None:
+        """Window on the persistent display if its X server is up, else headless."""
+        if not self._wants_display:
+            return
+        if alive is None:
+            alive = display_alive(self._config.display or "")
+        self._config.headless = not alive
+        self.display_lost = None if alive else self._config.display
+
     async def _launch_claimed(self) -> None:
+        self._settle_display()
         self._pw = await self._start_playwright()
         cache = UserAgentCache(self._config.data_dir / _UA_CACHE_NAME)
 
@@ -741,7 +774,16 @@ class BrowserSession:
         for channel in candidates:
             override = cache.get(channel or "bundled") if self._config.headless else None
             try:
-                self._context = await self._launch_context(channel, override)
+                try:
+                    self._context = await self._launch_context(channel, override)
+                except Exception as exc:  # noqa: BLE001 — re-raised unless the X server is gone
+                    if not (self._wants_display and _is_missing_x_server(exc)):
+                        raise
+                    # The socket was there and the server behind it was not: headless
+                    # rather than no browser at all, and open_browser says why.
+                    self._settle_display(alive=False)
+                    override = cache.get(channel or "bundled")
+                    self._context = await self._launch_context(channel, override)
                 self._active_channel = channel
                 break
             except Exception as exc:  # noqa: BLE001 — re-raised below unless "not installed"

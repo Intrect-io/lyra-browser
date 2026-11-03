@@ -35,6 +35,11 @@ window; the collaboration tools (highlight, ask_user_to_do, takeover) have no
 one to reach and answer "unattended".
 """
 
+_OVER_VNC = """\
+The window is on a VNC display: the user watches it from a VNC viewer, so tell
+them the address open_browser's watch field gives when you need them.
+"""
+
 # How the model gets to look at a capture, per client. The file is the same;
 # what differs is who turns the path into pixels.
 _SEEING = {
@@ -142,6 +147,8 @@ def instructions_for(cfg: Config) -> str:
     client does not make.
     """
     opening = _ATTENDED if cfg.attended else _UNATTENDED
+    if cfg.watch:
+        opening += _OVER_VNC
     handoff = _HANDOFF_ATTENDED if cfg.attended else _HANDOFF_UNATTENDED
     return opening + "\n" + _BODY.format(seeing=_SEEING[cfg.client], handoff=handoff)
 

@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .config import CLIENTS, Config, _has_display
+from .config import CLIENTS, Config, _has_display, display_alive, display_number
 from .profile_import import PINNED_CHANNELS, pinned_candidates, read_sidecar
 
 try:  # POSIX only, as in session.ProfileLock
@@ -184,7 +184,19 @@ def diagnose(
             "(close_browser there, or end that server)",
         )
 
-    display = has_display()
+    # A display lyra opens its window on itself (LYRA_BROWSER_DISPLAY, or the
+    # persistent VNC display `lyra-browser vnc install` keeps up) counts as one.
+    display = has_display() or bool(config.display and display_alive(config.display))
+    if (
+        config.display
+        and display_number(config.display) is not None
+        and not display_alive(config.display)
+    ):
+        problem(
+            "warning",
+            f"the display {config.display} lyra was told to use is not up",
+            "lyra-browser vnc status (or start the X server behind LYRA_BROWSER_DISPLAY)",
+        )
     if not config.headless and not display:
         problem(
             "error",
@@ -234,7 +246,12 @@ def diagnose(
             "note": writable_note,
         },
         "profile_lock": {"path": str(lock_path), "held_by_another": held},
-        "display": {"available": display, "needed": not config.headless},
+        "display": {
+            "available": display,
+            "needed": not config.headless,
+            "x_display": config.display,
+            "watch": config.watch,
+        },
         "imported_profile": imported,
         "problems": problems,
     }
@@ -256,7 +273,13 @@ def render(report: dict[str, Any]) -> str:
     dd = report["data_dir"]
     lines += [
         f"window      {'headless' if report['headless'] else 'headful'}"
-        f" (display {'yes' if report['display']['available'] else 'no'})",
+        f" (display {'yes' if report['display']['available'] else 'no'}"
+        + (
+            f", VNC {report['display']['watch']['vnc']} on {report['display']['x_display']}"
+            if report["display"].get("watch")
+            else ""
+        )
+        + ")",
         f"guard       {report['guard_backend']}, consent {report['consent_channel']}",
         f"data dir    {dd['path']} ({'writable' if dd['writable'] else 'NOT writable'}"
         f"{', ' + dd['note'] if dd['note'] else ''})",

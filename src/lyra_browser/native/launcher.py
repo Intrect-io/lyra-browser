@@ -296,6 +296,9 @@ async def launch(options: dict, *, timeout: float = START_TIMEOUT_S) -> BrowserP
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
+            # As in Playwright, ``env`` replaces the browser's environment (it is how
+            # a window is sent to a persistent VNC display); absent, it inherits ours.
+            env=options.get("env"),
         )
     except OSError as exc:
         raise Error(f"Failed to launch the browser process: {exc.strerror or exc}") from None

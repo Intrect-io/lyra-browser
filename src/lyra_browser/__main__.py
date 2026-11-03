@@ -3,8 +3,9 @@
 VEGA (mcp.json) and Hermes (config.yaml ``mcp_servers``) spawn this as a stdio
 MCP server. Pass ``--http`` to instead serve over Streamable HTTP for
 remote/dev use. ``lyra-browser profile ...`` imports the logins of the person's own
-browser profile instead of serving (see profile_cli.py), and ``lyra-browser doctor``
-reports what a launch would use and what would stop it (see doctor.py).
+browser profile instead of serving (see profile_cli.py), ``lyra-browser doctor``
+reports what a launch would use and what would stop it (see doctor.py), and
+``lyra-browser vnc ...`` keeps a VNC display up for a host with no screen (see vnc_cli.py).
 """
 
 from __future__ import annotations
@@ -83,6 +84,10 @@ def main() -> None:
         from .doctor import main as doctor_main
 
         raise SystemExit(doctor_main([*argv[len(lead) + 1 :], *lead]))
+    if argv[len(lead) : len(lead) + 1] == ["vnc"]:
+        from .vnc_cli import main as vnc_main
+
+        raise SystemExit(vnc_main([*lead, *argv[len(lead) + 1 :]]))
     args = build_parser().parse_args()
     if args.uat_run is not None:
         from .uat.server import serve_stdio

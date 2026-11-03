@@ -8,6 +8,7 @@ how a client passes per-install settings through its MCP server config.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -145,6 +146,76 @@ def _has_display() -> bool:
     if not sys.platform.startswith("linux"):
         return True
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+# Where X servers put their sockets. A module constant so tests can point it at a
+# directory of their own instead of the host's.
+X11_SOCKET_DIR = Path("/tmp/.X11-unix")
+# Clients that are a person at this machine: on a host with no display of its own
+# they are the ones a persistent VNC display (``lyra-browser vnc install``) is for.
+# Hermes and remote reach their user elsewhere and stay headless.
+_PERSISTENT_DISPLAY_CLIENTS = frozenset({"generic", "claude-code"})
+VNC_SIDECAR_NAME = "vnc.json"
+
+
+def vnc_dir() -> Path:
+    """Where ``lyra-browser vnc install`` keeps the password file and the sidecar.
+
+    Host-wide, not per client: one display serves every harness on this machine.
+    ``LYRA_BROWSER_VNC_DIR`` > ``$XDG_CONFIG_HOME/lyra-browser/vnc`` >
+    ``~/.config/lyra-browser/vnc``.
+    """
+    explicit = _env("LYRA_BROWSER_VNC_DIR")
+    if explicit:
+        return Path(explicit).expanduser()
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base).expanduser() / "lyra-browser" / "vnc"
+
+
+def read_vnc_sidecar(directory: Path | None = None) -> dict | None:
+    """What ``vnc install`` recorded (display, port, listen, screen), or None."""
+    try:
+        data = json.loads(((directory or vnc_dir()) / VNC_SIDECAR_NAME).read_text("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get("display"), str) else None
+
+
+def display_number(display: str) -> int | None:
+    """``":98"`` / ``":98.0"`` -> 98; a remote or malformed display -> None."""
+    m = re.fullmatch(r":(\d+)(?:\.\d+)?", display.strip())
+    return int(m.group(1)) if m else None
+
+
+def display_alive(display: str) -> bool:
+    """Whether a local X server answers on ``display``, judged by its socket.
+
+    The socket is what Chrome connects to, and checking it costs a stat: the
+    server must not start (or wait on) anything to find out.
+    """
+    number = display_number(display)
+    return number is not None and (X11_SOCKET_DIR / f"X{number}").exists()
+
+
+def _inherited_display() -> bool:
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def _persistent_display(client: str) -> tuple[str | None, dict | None]:
+    """The VNC display to open the window on, and what ``vnc install`` recorded.
+
+    Only where a person at this machine is the client and the process has no
+    display of its own: an inherited DISPLAY is a desktop someone is looking at.
+    A sidecar whose X server is not up is ignored (headless, as before).
+    """
+    if not sys.platform.startswith("linux") or client not in _PERSISTENT_DISPLAY_CLIENTS:
+        return None, None
+    if _inherited_display():
+        return None, None
+    sidecar = read_vnc_sidecar()
+    if sidecar is None or not display_alive(sidecar["display"]):
+        return None, None
+    return sidecar["display"], sidecar
 
 
 def _default_headless(client: str) -> bool:
@@ -394,6 +465,14 @@ class Config:
     # _default_headless): headful where someone can watch, headless where
     # nobody can. An explicit True/False always wins.
     headless: bool | None = None
+    # The X display the window opens on when it is not the inherited one. Set
+    # explicitly (LYRA_BROWSER_DISPLAY), or resolved from a persistent VNC display
+    # that ``lyra-browser vnc install`` set up (see _persistent_display). None:
+    # whatever display the process inherited, if any.
+    display: str | None = None
+    # What ``vnc install`` recorded about that display (port, listen address), so
+    # open_browser can tell the agent where the user watches. Never a password.
+    vnc: dict | None = None
     # Mirror every audit record to stderr as well as audit.jsonl. A container's
     # disk is gone when it sleeps; its stderr is collected by the platform.
     audit_stderr: bool = False
@@ -500,8 +579,16 @@ class Config:
             self.client = _detect_client()
         if self.data_dir is None:
             self.data_dir = _default_data_dir(self.client)
+        if self.display is None and self.vnc is None:
+            self.display, self.vnc = _persistent_display(self.client)
+        elif self.display is not None and self.vnc is None:
+            sidecar = read_vnc_sidecar()
+            if sidecar is not None and sidecar.get("display") == self.display:
+                self.vnc = sidecar
         if self.headless is None:
-            self.headless = _default_headless(self.client)
+            self.headless = _default_headless(self.client) and not (
+                self.display and self.client not in ("hermes", "remote")
+            )
         self.profile_dir = self.data_dir / "profile"
         self.audit_path = self.data_dir / "audit.jsonl"
         self.capture_dir = _default_capture_dir(self.data_dir, self.client)
@@ -537,6 +624,21 @@ class Config:
         """
         return not self.headless
 
+    @property
+    def watch(self) -> dict | None:
+        """Where the user watches a window on a persistent VNC display, or None.
+
+        The address only: the password stays in the file ``vnc install`` wrote,
+        and never reaches the model.
+        """
+        if self.headless or not self.display or not self.vnc:
+            return None
+        listen, port = self.vnc.get("listen"), self.vnc.get("port")
+        if not listen or not port:
+            return None
+        host = f"[{listen}]" if ":" in str(listen) else str(listen)
+        return {"vnc": f"{host}:{port}", "display": self.display}
+
     @classmethod
     def from_env(cls, client: str | None = None) -> Config:
         """Build from the environment. ``client`` (the ``--client`` flag) beats
@@ -544,6 +646,7 @@ class Config:
         return cls(
             client=client if client in CLIENTS else _detect_client(),
             headless=_as_optional_bool(_env("LYRA_BROWSER_HEADLESS")),
+            display=_env("LYRA_BROWSER_DISPLAY") or None,
             viewport_width=_as_viewport(
                 _env("LYRA_BROWSER_VIEWPORT"),
                 (

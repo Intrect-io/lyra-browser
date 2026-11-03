@@ -39,7 +39,18 @@ done
 cache="${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"
 [[ -d "$cache" ]] && echo "bundled:      $(ls "$cache" 2>/dev/null | tr '\n' ' ')" || echo "bundled:      none ($cache); the install-browser skill adds one"
 case "$(uname -s)" in
-  Linux) echo "display:      DISPLAY=${DISPLAY:-} WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-} (none means headless, nobody can watch)";;
+  Linux)
+    echo "display:      DISPLAY=${DISPLAY:-} WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-} (none: the VNC display below if it is up, else headless)"
+    vnc_json="${LYRA_BROWSER_VNC_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/lyra-browser/vnc}/vnc.json"
+    if [[ -f "$vnc_json" ]]; then
+      vnc_disp="$(sed -n 's/.*"display": *"\(:[0-9]*\)".*/\1/p' "$vnc_json")"
+      vnc_port="$(sed -n 's/.*"port": *\([0-9]*\).*/\1/p' "$vnc_json")"
+      vnc_listen="$(sed -n 's/.*"listen": *"\([^"]*\)".*/\1/p' "$vnc_json")"
+      [[ -S "/tmp/.X11-unix/X${vnc_disp#:}" ]] && vnc_up="up" || vnc_up="DOWN (lyra-browser vnc status)"
+      echo "vnc display:  $vnc_disp $vnc_up, viewer at $vnc_listen:$vnc_port"
+    else
+      echo "vnc display:  none (lyra-browser vnc install keeps one up for a host with no screen)"
+    fi;;
   *)     echo "display:      $(uname -s) opens windows without a display variable";;
 esac
 data_dir="${LYRA_BROWSER_DATA_DIR:-$HOME/.lyra-browser}"

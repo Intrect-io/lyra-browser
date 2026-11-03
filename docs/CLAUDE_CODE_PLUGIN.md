@@ -92,7 +92,8 @@ in your shell.
 | Denied sites | `LYRA_BROWSER_DENIED_ORIGINS` | Refused whatever else says yes. |
 | Consent timeout | `LYRA_BROWSER_CONSENT_TIMEOUT` | Seconds a dialog waits before the action counts as denied (default 300). |
 | Navigation guard backend | `LYRA_BROWSER_GUARD` | `route` or `cdp`; see the README's Guard backends. |
-| Headless | `LYRA_BROWSER_HEADLESS` | Unset: a window wherever one can open, and headless (`attended=false`) on Linux with no `DISPLAY`/`WAYLAND_DISPLAY`. Set to off, it asks for a window even there, and Chrome fails to launch without a reachable X server. |
+| Headless | `LYRA_BROWSER_HEADLESS` | Unset: a window wherever one can open, and headless (`attended=false`) on Linux with no `DISPLAY`/`WAYLAND_DISPLAY` unless `lyra-browser vnc install` keeps a VNC display up there. Set to off, it asks for a window even there, and Chrome fails to launch without a reachable X server. |
+| X display | `LYRA_BROWSER_DISPLAY` | The display the window opens on, e.g. `:98`. Unset: the persistent VNC display, if its X socket exists (README, "A persistent VNC display"). |
 
 The consent channel is one of the two values above. With `elicit` the server
 asks through MCP elicitation and never falls back to the model's own
@@ -257,6 +258,10 @@ not auto-update unless the user turns it on under `/plugin` → Marketplaces).
   Code. From a shell, run `lyra-browser` from a venv of your own instead.
 - **A window never appears on Linux.** `/lyra-browser:doctor` shows the
   display variables the server got. Claude Code started from a terminal with
-  no desktop session passes none, and the server runs headless.
+  no desktop session passes none, and the server runs headless. On such a host
+  (a server over SSH), `lyra-browser vnc install [--listen <private address>]`
+  keeps a VNC display up: the next `open_browser` opens the window there and its
+  `watch` field gives the viewer address. `/lyra-browser:doctor` shows whether
+  that display is up.
 - **`profile: "instance"` and no logins.** Another lyra server holds
   `~/.lyra-browser/profile.lock`; `/lyra-browser:doctor` says so.

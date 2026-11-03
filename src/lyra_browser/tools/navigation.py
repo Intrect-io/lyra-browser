@@ -152,6 +152,22 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             "profile": getattr(ctx.session, "profile_mode", "shared"),
         }
         notes = []
+        watch = ctx.config.watch
+        if watch:
+            result["watch"] = watch
+            notes.append(
+                "The window is on a VNC display this host keeps up for the user: they "
+                f"watch and take over by connecting a VNC viewer to {watch['vnc']}, with "
+                "the password `lyra-browser vnc install` printed for them (never ask for "
+                "it or repeat it). Tell them that address when you need their eyes or hands."
+            )
+        lost = getattr(ctx.session, "display_lost", None)
+        if lost:
+            result["display_lost"] = lost
+            notes.append(
+                f"The persistent display {lost} is not up, so this session is headless. "
+                "The user can check it with `lyra-browser vnc status`."
+            )
         imported = read_sidecar(ctx.config) if result["profile"] == "shared" else None
         if imported:
             result["imported_from"] = {

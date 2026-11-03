@@ -182,3 +182,33 @@ def test_the_cli_answers_json_and_its_exit_code_is_ok(tmp_path, monkeypatch, cap
     monkeypatch.setattr(doctor, "_has_display", lambda: True)
     monkeypatch.setattr("lyra_browser.session.installed", installed())
     assert doctor.main(["--data-dir", str(data), "--headless"]) == 1
+
+
+def test_a_live_vnc_display_counts_as_a_display(tmp_path, monkeypatch):
+    from lyra_browser import config as config_mod
+
+    sockets = tmp_path / "x11"
+    sockets.mkdir()
+    (sockets / "X98").touch()
+    monkeypatch.setattr(config_mod, "X11_SOCKET_DIR", sockets)
+    cfg = make_config(
+        tmp_path,
+        headless=False,
+        display=":98",
+        vnc={"display": ":98", "listen": "127.0.0.1", "port": 5902},
+    )
+
+    report = run(cfg, display=False)
+
+    assert report["ok"] is True, report["problems"]
+    assert report["display"]["watch"] == {"vnc": "127.0.0.1:5902", "display": ":98"}
+    assert "VNC 127.0.0.1:5902 on :98" in doctor.render(report)
+
+
+def test_a_configured_display_that_is_down_is_a_warning(tmp_path, monkeypatch):
+    from lyra_browser import config as config_mod
+
+    monkeypatch.setattr(config_mod, "X11_SOCKET_DIR", tmp_path / "empty")
+    report = run(make_config(tmp_path, headless=False, display=":98"), display=False)
+    assert report["ok"] is False
+    assert any("not up" in p["what"] for p in report["problems"])

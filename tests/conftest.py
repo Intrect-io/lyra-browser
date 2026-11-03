@@ -615,12 +615,16 @@ class FakeSession:
 
 
 @pytest.fixture(autouse=True)
-def _no_host_client(monkeypatch):
+def _no_host_client(monkeypatch, tmp_path_factory):
     """Keep the host's own harness out of client detection. A developer running
     the suite inside a Hermes shell has HERMES_HOME set, which would otherwise
     move every default path into their real ~/.hermes."""
     monkeypatch.delenv("HERMES_HOME", raising=False)
     monkeypatch.delenv("LYRA_BROWSER_CLIENT", raising=False)
+    # Nor the host's persistent VNC display (`lyra-browser vnc install`): with one
+    # up, every Config built on a display-less Linux host would open a window.
+    monkeypatch.delenv("LYRA_BROWSER_DISPLAY", raising=False)
+    monkeypatch.setenv("LYRA_BROWSER_VNC_DIR", str(tmp_path_factory.mktemp("no-vnc")))
 
 
 @pytest.fixture
