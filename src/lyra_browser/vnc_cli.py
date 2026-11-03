@@ -27,7 +27,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -65,8 +65,10 @@ class Host:
 
     vnc_dir: Path
     unit_dir: Path
-    run: Runner = _run
-    which: Callable[[str], str | None] = shutil.which
+    # Factories, not class attributes: a plain function stored on the class would read
+    # as a method to anyone (or any analyser) who forgets the instance attribute wins.
+    run: Runner = field(default_factory=lambda: _run)
+    which: Callable[[str], str | None] = field(default_factory=lambda: shutil.which)
     platform: str = sys.platform
 
     @classmethod
