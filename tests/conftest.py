@@ -26,6 +26,7 @@ from lyra_browser.dialogs import DialogHandler
 from lyra_browser.origin import parse_origin
 from lyra_browser.permission import Capability
 from lyra_browser.tools import register_all
+from lyra_browser.tools.devtools import _PERF_JS, _STORAGE_JS
 
 # The tool module's own scripts, so a fake can answer the same question a real
 # page would. Imported rather than duplicated: a copy that drifts would let a
@@ -209,6 +210,79 @@ class FakeMouse:
             self._page.scroll_y = int(max(0, min(moved, self._page.scroll_max)))
 
 
+class FakeBrowserContext:
+    """What ``page.context`` offers the storage tool: the cookies a URL would send."""
+
+    def __init__(self) -> None:
+        self.cookie_jar: list[dict] = [
+            {
+                "name": "sid",
+                "value": "s3cr3t",
+                "domain": "start.example",
+                "path": "/",
+                "expires": -1,
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": "Lax",
+            }
+        ]
+
+    async def cookies(self, urls: Any = None) -> list[dict]:
+        return list(self.cookie_jar)
+
+
+class FakeRequest:
+    """A Playwright Request as the network listeners see it."""
+
+    def __init__(
+        self,
+        url: str,
+        method: str = "GET",
+        resource_type: str = "fetch",
+        headers: dict | None = None,
+        post_data: str | None = None,
+    ) -> None:
+        self.url = url
+        self.method = method
+        self.resource_type = resource_type
+        self.headers = headers or {"accept": "*/*", "cookie": "sid=s3cr3t"}
+        self.post_data = post_data
+        self.failure: str | None = None
+        self.timing: dict = {"startTime": 0, "responseStart": -1, "responseEnd": -1}
+
+    async def all_headers(self) -> dict:
+        return dict(self.headers)
+
+
+class FakeResponse:
+    def __init__(
+        self,
+        request: FakeRequest,
+        status: int = 200,
+        headers: dict | None = None,
+        body: bytes = b'{"ok": true}',
+    ) -> None:
+        self.request = request
+        self.url = request.url
+        self.status = status
+        self.status_text = "OK" if status < 400 else "Error"
+        self.headers = headers or {"content-type": "application/json", "set-cookie": "a=b"}
+        self._body = body
+
+    async def all_headers(self) -> dict:
+        return dict(self.headers)
+
+    async def body(self) -> bytes:
+        return self._body
+
+
+class FakeConsoleMessage:
+    def __init__(self, text: str, type: str = "log") -> None:
+        self.text = text
+        self.type = type
+        self.location = {"url": "https://start.example/app.js?v=1", "lineNumber": 3}
+
+
 class FakePage:
     """A Playwright Page stand-in whose every mutation lands in ``calls``.
 
@@ -239,6 +313,22 @@ class FakePage:
         self.scroll_y = 0
         self.scroll_height = 5000
         self.viewport_height = 800
+        # Listeners added with on(), so a test can deliver an event with emit().
+        self.listeners: dict[str, list] = {}
+        # What page_performance and storage read, shaped like their scripts' results.
+        self.perf_dump: dict = {
+            "navigation": {"ttfb_ms": 12.5, "load_ms": 80.0},
+            "paint": {"first-contentful-paint": 40.0},
+            "vitals": {"lcp_ms": 55.0, "cls": 0.01},
+            "resources": {
+                "count": 1,
+                "slowest": [{"url": "https://start.example/a.js?k=secret", "duration_ms": 9.0}],
+            },
+        }
+        self.storage_items: list[dict] = [{"name": "theme", "value": "dark"}]
+        # What the console expression prompt answers, keyed by expression.
+        self.eval_answers: dict[str, Any] = {}
+        self.context = FakeBrowserContext()
         self.scroll_locked = False
         # Selectors standing in for iframes, so a frame_locator() can be answered.
         self.frames: set[str] = set()
@@ -453,6 +543,20 @@ class FakePage:
 
     async def evaluate(self, expression: str, arg: Any = None) -> Any:
         self.calls.append(("evaluate", expression, arg))
+        if expression == _PERF_JS:
+            return self.perf_dump
+        if expression == _STORAGE_JS:
+            items = [
+                {"name": i["name"], "size": len(i["value"])}
+                | ({"value": i["value"]} if arg["reveal"] else {})
+                for i in self.storage_items
+            ]
+            return {"count": len(items), "items": items}
+        if expression in self.eval_answers:
+            answer = self.eval_answers[expression]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
         if expression == _SCROLL_STATE_JS:
             return self.scroll_state()
         if expression == _SCROLL_TO_JS:
@@ -480,8 +584,18 @@ class FakePage:
         self.calls.append(("wait_for_timeout", ms))
 
     def on(self, event: str, handler) -> None:
-        """Record a listener being added. Nothing is delivered through it."""
+        """Record a listener being added; ``emit`` delivers through it."""
         self.calls.append(("on", event))
+        self.listeners.setdefault(event, []).append(handler)
+
+    def remove_listener(self, event: str, handler) -> None:
+        if handler in self.listeners.get(event, []):
+            self.listeners[event].remove(handler)
+
+    def emit(self, event: str, *payload: Any) -> None:
+        """Deliver an event the way Playwright does: to every listener, synchronously."""
+        for handler in list(self.listeners.get(event, [])):
+            handler(*payload)
 
     def raise_dialog(self, dialog: str | FakeDialog) -> FakeDialog:
         """Deliver a native dialog the way the browser does: to the session's listener.

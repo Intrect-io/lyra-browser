@@ -44,6 +44,19 @@ class Capability(StrEnum):
     UPLOAD = "upload"
     """Give a file to a page — a file picker, or a drag-and-drop target."""
 
+    INSPECT = "inspect"
+    """Read what the page holds for the logged-in person: response bodies, cookie and
+    storage values, full request URLs. The page's secrets reach the model, which is
+    why reading them is a scope of its own and never implied by visiting the site."""
+
+    EVALUATE = "evaluate"
+    """Run script the caller wrote inside the page, as a DevTools console does.
+
+    Single-use and implied by nothing: script can ``fetch()`` a POST, which is not a
+    document request, so the navigation guard never sees it. This grant is the only
+    gate in front of whatever the expression does.
+    """
+
     PUBLISH = "publish"
     """Make content publicly visible — an item an audience can see, not a draft.
 
@@ -59,7 +72,13 @@ class Capability(StrEnum):
 # later click takes it back. PUBLISH too: an audience that saw something cannot
 # unsee it.
 _SINGLE_USE = frozenset(
-    {Capability.SUBMIT, Capability.DOWNLOAD, Capability.UPLOAD, Capability.PUBLISH}
+    {
+        Capability.SUBMIT,
+        Capability.DOWNLOAD,
+        Capability.UPLOAD,
+        Capability.PUBLISH,
+        Capability.EVALUATE,
+    }
 )
 
 # Being allowed onto a site carries permission to use it. Asking again for every

@@ -455,6 +455,8 @@ class UatMiddleware(Middleware):
         status = payload.get("status", "ok") if isinstance(payload, dict) else "ok"
         if step.action and self.recorder.auto_screenshot and status not in NO_ATTEMPT:
             shot = await self.recorder.take_screenshot()
-        self.recorder.complete(step, payload, is_error=result.is_error, screenshot=shot)
+        self.recorder.complete(
+            step, payload, is_error=bool(getattr(result, "is_error", False)), screenshot=shot
+        )
         self.recorder.write_observations()
         return result

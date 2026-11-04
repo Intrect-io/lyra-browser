@@ -66,3 +66,44 @@ def test_events_carry_what_the_observer_reads():
     assert (msg.type, msg.text, msg.location["url"]) == ("error", "boom 42", "https://x/app.js")
     err = PageError({"exceptionDetails": {"exception": {"description": "Error: kaboom"}}})
     assert err.message == "Error: kaboom" and str(err) == "Error: kaboom"
+
+
+def test_timing_comes_from_the_browser_clock_in_playwright_shape():
+    req = Request(
+        {
+            "requestId": "7",
+            "request": {"url": "https://x/a", "headers": {"Accept": "*/*"}},
+            "timestamp": 100.0,
+            "wallTime": 1_700_000_000.0,
+        }
+    )
+    assert req.timing == {"startTime": 1_700_000_000_000.0, "responseStart": -1, "responseEnd": -1}
+    ObservedResponse(
+        {
+            "requestId": "7",
+            "response": {
+                "url": "https://x/a",
+                "status": 200,
+                "headers": {"Content-Type": "text/html"},
+                "timing": {"requestTime": 100.01, "receiveHeadersEnd": 15.0},
+            },
+        },
+        req,
+    )
+    req._finished({"timestamp": 100.05, "encodedDataLength": 1234})
+    assert round(req.timing["responseStart"], 3) == 25.0
+    assert round(req.timing["responseEnd"], 3) == 50.0
+    assert req.encoded_bytes == 1234
+
+
+async def test_response_body_asks_chrome_for_it():
+    class Page:
+        async def _send(self, method, params):
+            assert (method, params) == ("Network.getResponseBody", {"requestId": "9"})
+            return {"body": "aGk=", "base64Encoded": True}
+
+    resp = ObservedResponse(
+        {"requestId": "9", "response": {"url": "https://x/b", "status": 200}}, None, Page()
+    )
+    assert await resp.body() == b"hi"
+    assert await resp.all_headers() == {}

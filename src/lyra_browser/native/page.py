@@ -220,6 +220,7 @@ class NativePage:
         self._on("Page.javascriptDialogOpening", self._on_dialog)
         self._on("Network.requestWillBeSent", self._on_request)
         self._on("Network.responseReceived", self._on_response)
+        self._on("Network.loadingFinished", self._on_loading_finished)
         self._on("Network.loadingFailed", self._on_loading_failed)
         commands = [
             self._send("Page.enable", timeout=INIT_TIMEOUT_S),
@@ -365,7 +366,7 @@ class NativePage:
     def _on_request(self, params: dict) -> None:
         if not self._observed():
             return
-        request = Request(params)
+        request = Request(params, self)
         self._requests[params.get("requestId", "")] = request
         while len(self._requests) > 512:
             self._requests.pop(next(iter(self._requests)))
@@ -377,13 +378,21 @@ class NativePage:
     def _on_response(self, params: dict) -> None:
         if self._observed():
             request = self._requests.get(params.get("requestId", ""))
-            self._emit("response", ObservedResponse(params, request))
+            self._emit("response", ObservedResponse(params, request, self))
         if params.get("type") == "Document" and params.get("frameId") == self.target_id:
             loader = params.get("loaderId") or params.get("requestId", "")
             self._responses[loader] = Response(params)
             # Only the latest few matter: a goto reads its own right after it lands.
             while len(self._responses) > 16:
                 self._responses.pop(next(iter(self._responses)))
+
+    def _on_loading_finished(self, params: dict) -> None:
+        if not self._observed():
+            return
+        request = self._requests.pop(params.get("requestId", ""), None)
+        if request is not None:
+            request._finished(params)
+            self._emit("requestfinished", request)
 
     def _on_loading_failed(self, params: dict) -> None:
         if self._observed():

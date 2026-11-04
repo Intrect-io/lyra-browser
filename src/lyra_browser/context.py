@@ -11,6 +11,7 @@ from .approval import CollaborationState
 from .audit import AuditLog
 from .config import Config
 from .consent import ConsentBroker
+from .devtools import DevtoolsRecorder
 from .downloads import Downloads
 from .enforcement import NavigationGuard
 from .permission import PermissionStore
@@ -39,6 +40,8 @@ class ServerContext:
     """Serialises claiming and releasing. See claim_session."""
     downloads: Downloads | None = None
     """Judges every file a tab is offered, and saves the ones asked for. See downloads.py."""
+    devtools: DevtoolsRecorder | None = None
+    """The console and network log every tab feeds. See devtools.py."""
 
     def __post_init__(self) -> None:
         if self.perms is None:
@@ -59,8 +62,15 @@ class ServerContext:
                 # ask the live request; the tools leave the session key on the guard.
                 session_key=lambda: self.guard.session_key,
             )
+        if self.devtools is None:
+            self.devtools = DevtoolsRecorder()
         # The session puts this on every tab it adopts.
         self.session.download_handler = self.downloads.on_download
+        # Called for every tab the session adopts, like a UAT run's observers. A test
+        # double without the list simply records nothing.
+        observers = getattr(self.session, "page_observers", None)
+        if isinstance(observers, list) and self.devtools.attach not in observers:
+            observers.append(self.devtools.attach)
         # The session puts this in front of the browser when it starts: as a Playwright
         # route handler (and, for redirect hops, the guard's request listener), or behind the
         # CDP sidecar, whichever config.guard_backend says.

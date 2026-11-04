@@ -20,7 +20,8 @@ reads only the permission store. Single-use scopes are never on it.
 
 A fourth is the ``autonomous`` channel, for a run nobody attends: it approves what a
 task on the open web needs (every site, and a declared SUBMIT / UPLOAD / DOWNLOAD), is
-recorded as ``consent_channel=autonomous``, and still refuses PUBLISH, opaque origins and
+recorded as ``consent_channel=autonomous``, and still refuses PUBLISH, EVALUATE, INSPECT,
+opaque origins and
 ``denied_origins``.
 
 A fifth is ``bypass``: Claude Code running in bypassPermissions mode, where the person
@@ -349,6 +350,12 @@ class ConsentBroker:
         """
         if capability is Capability.PUBLISH:
             return Decision(False, "denied", "autonomous channel never approves PUBLISH")
+        if capability in (Capability.EVALUATE, Capability.INSPECT):
+            # Script the model wrote, and the page's secrets handed to the model: with
+            # nobody watching, a page's injected text could steer either one.
+            return Decision(
+                False, "denied", f"autonomous channel never approves {capability.value.upper()}"
+            )
         if origin.is_opaque:
             return Decision(False, "denied", "autonomous channel does not approve opaque origins")
         return Decision(True, "autonomous", "approved by the autonomous channel")

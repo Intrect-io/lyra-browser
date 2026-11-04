@@ -11,6 +11,7 @@ from fastmcp import FastMCP
 from ..context import ServerContext
 from . import (
     collaboration,
+    devtools,
     dialogs,
     downloads,
     forms,
@@ -32,3 +33,4 @@ def register_all(mcp: FastMCP, ctx: ServerContext) -> None:
     waiting.register(mcp, ctx)
     downloads.register(mcp, ctx)
     collaboration.register(mcp, ctx)
+    devtools.register(mcp, ctx)

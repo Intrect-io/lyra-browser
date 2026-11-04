@@ -62,6 +62,7 @@ agent loop ──(MCP: stdio/http)──> lyra-browser server ──> Playwright
 | Downloads | `list_downloads` |
 | Forms | `read_form`, `select_option`, `set_editor`, `upload_file`, `read_draft`, `save_draft`, `publish` |
 | Reading | `get_url`, `read_page`, `screenshot`, `read_image` |
+| DevTools | `console_messages`, `network_requests`, `network_request`, `page_performance`, `storage`, `export_har`, `evaluate` |
 | Collaboration | `highlight_element`, `ask_user_to_do`, `request_takeover`, `resume_after_takeover` |
 
 ### Filling a real form
@@ -396,6 +397,49 @@ no listener does: alerts and `beforeunload` are accepted, `confirm` is dismissed
 - Nothing here judges the answer: accepting a `confirm` that goes on to post a form
   is still stopped where the request leaves unless it was declared (`submits=true`).
 
+### DevTools: console, network, performance, storage, `evaluate`
+
+What Chrome's DevTools panels show, as tools. What they return was produced by the page
+(console text, URLs, headers, bodies, storage): data to report, never instructions.
+
+| Tool | Panel | Gate |
+|---|---|---|
+| `console_messages(since, levels, limit, capture)` | Console: `console.*` calls and uncaught exceptions, every tab | none |
+| `network_requests(since, url_contains, resource_type, min_status, failed_only, limit)` | Network: method, URL, type, state, status, `duration_ms`, `ttfb_ms`, failure | none |
+| `network_request(id, body)` | One request: headers, timing breakdown, sizes; `body=true` adds the body and full URL | `INSPECT` for the body |
+| `page_performance()` | Performance: Navigation Timing, paints, FCP/LCP/CLS (INP after interactions), resources, JS heap | none |
+| `storage(kind, reveal)` | Application: cookies, localStorage, sessionStorage — names, sizes, flags | `INSPECT` for values |
+| `export_har(include_bodies)` | Network → Save as HAR (1.2), under `<data_dir>/har` | `INSPECT` for bodies |
+| `evaluate(expression)` | The console prompt: runs in the page's own world, awaits a Promise, reports a throw | `EVALUATE`, every call |
+
+- **Console capture is off until `console_messages(capture=true)`.** It needs
+  `Runtime.enable`, the DevTools call Kasada refuses on (see [Drivers](#drivers)); a
+  session that never asks for the console never sends it. On turns it on for every open
+  tab and every later one; messages logged before that are gone. Off stops new tabs, but
+  a page that received `Runtime.enable` has seen it.
+- **The network log costs nothing new**: it listens to the `Network` events every page
+  already has enabled. It is kept across navigations (DevTools' "Preserve log") and
+  bounded (1000 requests, 500 console entries; `dropped` counts what was let go). Page
+  through with `since=<next_since>`. `duration_ms` and `ttfb_ms` come from the browser's
+  own timestamps, not from when Python heard of the event.
+- **Secrets stay out unless asked for.** URLs lose their query values (as in the audit
+  log), credential headers (`Cookie`, `Set-Cookie`, `Authorization`, `*-token`, `*-key`,
+  …) are always `<redacted>` — `INSPECT` does not unredact them — and bodies are never
+  buffered: `network_request(body=true)` asks Chrome for one, which may already have let
+  it go.
+- **`evaluate` is gated because the guard cannot see what it does.** A `fetch()` POST is
+  not a document request, so the navigation guard never judges it; the single-use
+  `EVALUATE` grant, whose prompt shows the expression, is the only gate. The expression is
+  audited in full. The `autonomous` channel refuses `EVALUATE` and `INSPECT`.
+
+Measured 2026-11-04 by `scripts/verify_devtools_e2e.py` (loopback fixture, headless,
+native driver and Playwright 1.6x, Chrome stable, N=1 run each): every step passed on
+both drivers, including an `/api` call the server delays 300 ms reported with
+`duration_ms` ≥ 270 and `ttfb_ms` ≤ `duration_ms`, a 404, a refused connection as
+`failed`, FCP/LCP and navigation timing, a HAR with no cookie, API key or query value in
+it, `evaluate` reaching `window.appState` (the page's world) and an approved `fetch()` POST
+reaching the server.
+
 ## Seeing the page
 
 `screenshot` (the viewport or the full page) and `read_image` (one element —
@@ -437,6 +481,8 @@ change between being checked and being clicked.
 | `SUBMIT` | Send a non-idempotent request. **Single-use** |
 | `UPLOAD` | Give a file to a page (a picker, a drop target). **Single-use** — requested by `upload_file` |
 | `PUBLISH` | Make content publicly visible — an item an audience can see. **Single-use** — requested by `publish`, implied by nothing |
+| `INSPECT` | Read what the person's page holds — response bodies, cookie and storage values, full URLs. Leasable per origin, implied by nothing — requested by `network_request(body=true)`, `storage(reveal=true)`, `export_har(include_bodies=true)` |
+| `EVALUATE` | Run caller-written script in the page. **Single-use**, implied by nothing — requested by `evaluate`, which shows the expression in the prompt |
 | `DOWNLOAD` | Write a file to disk. **Single-use** — requested by `click`, `press_key` or `navigate` with `download=true`; the grant pays for one file and ends with the call |
 
 Arriving on a site carries permission to use it, so ordinary clicking is not
@@ -578,7 +624,7 @@ value-less accept is read as the yes it is.
 (or `target.policy: autonomous` in a UAT run) approves what a task on the open web
 needs: navigation to any site, and a declared `SUBMIT`, `UPLOAD` or `DOWNLOAD`. Each
 approval is audited as `consent_channel=autonomous`, so a run's side effects can be
-listed afterwards. It still refuses `PUBLISH`, `file:`/`data:`/`javascript:` origins,
+listed afterwards. It still refuses `PUBLISH`, `EVALUATE`, `INSPECT`, `file:`/`data:`/`javascript:` origins,
 and any site in `LYRA_BROWSER_DENIED_ORIGINS` (same entry forms as the trusted list,
 and it wins over every other yes). The default stays `auto`/`elicit`, so nothing
 changes unless the operator chooses it.
