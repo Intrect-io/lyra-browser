@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -208,7 +209,7 @@ async def test_export_har_is_redacted_and_bodies_are_gated(make_ctx, tools_of, p
     _traffic(page)
     out = await tools["export_har"]()
     assert out["status"] == "ok" and out["entries"] == 2
-    har = json.loads(open(out["har_path"], encoding="utf-8").read())
+    har = json.loads(Path(out["har_path"]).read_text(encoding="utf-8"))
     first = har["log"]["entries"][0]
     assert har["log"]["version"] == "1.2"
     assert {"name": "cookie", "value": REDACTED} in first["request"]["headers"]
@@ -220,7 +221,7 @@ async def test_export_har_is_redacted_and_bodies_are_gated(make_ctx, tools_of, p
     assert refused["status"] == "needs_approval"
     full = await tools["export_har"](include_bodies=True, confirm=True)
     assert full["bodies"] == 1
-    har = json.loads(open(full["har_path"], encoding="utf-8").read())
+    har = json.loads(Path(full["har_path"]).read_text(encoding="utf-8"))
     assert har["log"]["entries"][0]["response"]["content"]["text"] == '{"ok": true}'
 
 

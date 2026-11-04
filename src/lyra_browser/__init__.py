@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.3.0"  # equal to pyproject.toml (tests/test_npm_package.py)
+__version__ = "0.4.0"  # equal to pyproject.toml (tests/test_npm_package.py)
 
 from .config import Config
 from .server import build_server
