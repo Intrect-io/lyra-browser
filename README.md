@@ -357,8 +357,9 @@ arrives:
   `LYRA_BROWSER_DOWNLOAD_TIMEOUT`), and the dir is pruned oldest-first to
   `LYRA_BROWSER_DOWNLOAD_KEEP` using a ledger, so files that are not this server's
   are never deleted.
-- While the user holds a **takeover** the gate stands aside and their own
-  downloads are saved, recorded as `user_driven`, as with navigation.
+- While the user holds a **takeover**, or does a step `ask_user_to_do` asked of them,
+  the gate stands aside and their own downloads are saved, recorded as `user_driven`,
+  as with navigation.
 - `list_downloads` — the files this session saved (`filename`, `path`, `bytes`,
   `url_origin`), oldest first, plus `download_dir`. A read: no approval, works
   during a takeover, does not open the browser. Blocked and failed downloads are
@@ -677,6 +678,15 @@ holding a person to them would refuse them their own browser, and takeover exist
 for the passwords, CAPTCHAs, 2FA and payments the agent must not do alone — every
 one of which is a navigation. Those are recorded as `user_driven`, so the trail
 distinguishes what a person did from what was approved for the agent.
+
+**A requested step.** `ask_user_to_do` hands the window over the same way without
+freezing the agent, which keeps reading to see when the step is done. Until the agent's
+next acting call (anything that stands down for a takeover, except `highlight_element`)
+the user's sign-in, CAPTCHA or payment navigates as theirs (`user_driven`, `reason`
+`ask_user_to_do`; a takeover's rows say `takeover`). That call takes the window back, and
+so does closing the browser or handing it to another session. Without this, a user asked
+to sign in clicked "Log in" and nothing happened: the guard measured their form POST
+against the agent's grants, which held no `SUBMIT`.
 
 ## Guard backends
 

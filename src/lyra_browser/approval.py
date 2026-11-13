@@ -66,6 +66,28 @@ class CollaborationState:
     require_approval: bool = True
     takeover: bool = False
     takeover_reason: str = ""
+    user_turn: bool = False
+    """Set by ``ask_user_to_do``: the user was asked to do a step in the window.
+
+    Lighter than a takeover: the agent is not frozen (it polls with reads to see
+    whether the step is done), but until it acts again the navigations the
+    window makes are the user's — a sign-in, a CAPTCHA, a payment — and are not
+    measured against the agent's grants. The agent's next mutating call ends it
+    (``assert_agent_may_act``), as does letting go of the browser.
+    """
+
+    @property
+    def user_driving(self) -> str:
+        """Who the guard should credit with the window's navigations: empty when the agent.
+
+        ``"takeover"`` or ``"ask_user_to_do"`` otherwise, which is what the audit row
+        names, so a takeover and a requested step stay apart on the trail.
+        """
+        if self.takeover:
+            return "takeover"
+        if self.user_turn:
+            return "ask_user_to_do"
+        return ""
 
     def gate(self, action: str, reason: str, confirm: bool) -> None:
         """Enforce the risk gate for a high-impact action.
@@ -76,7 +98,23 @@ class CollaborationState:
             return
         raise ApprovalRequired(action, reason)
 
-    def assert_agent_may_act(self) -> None:
-        """Block agent-driven mutations while the user holds a takeover."""
+    def assert_agent_may_act(self, *, ends_user_turn: bool = True) -> None:
+        """Block agent-driven mutations while the user holds a takeover.
+
+        Passing also takes the wheel back from a step the user was asked to do:
+        from here the window's navigations are the agent's again and are judged
+        against its grants. ``ends_user_turn=False`` is for the calls that only
+        point at something for the user (``highlight_element``).
+        """
         if self.takeover:
             raise TakeoverActive(self.takeover_reason or "User has taken over the session.")
+        if ends_user_turn:
+            self.user_turn = False
+
+    def hand_to_user(self) -> None:
+        """Open the user's turn (see ``user_turn``)."""
+        self.user_turn = True
+
+    def end_user_turn(self) -> None:
+        """Close the user's turn without anything else (the browser was let go)."""
+        self.user_turn = False

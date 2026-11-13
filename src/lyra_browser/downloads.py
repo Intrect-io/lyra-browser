@@ -538,7 +538,7 @@ class Downloads:
         initiator = parse_origin(getattr(page, "url", "")).describe()
         suggested = sanitize_filename(getattr(download, "suggested_filename", ""))
         session = self._session_key()
-        if self._collab is not None and self._collab.takeover:
+        if self._collab is not None and self._collab.user_driving:
             decision = _USER
         elif self.observing:
             # Record, never gate and never spend, as the guard does in this mode: a

@@ -60,8 +60,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             return err
         # This injects a style and scrolls the viewport — it writes to the page,
         # so it waits like every other write while the user holds the session.
+        # Pointing at something is not taking the wheel: a step the user was
+        # asked to do stays theirs.
         try:
-            ctx.collab.assert_agent_may_act()
+            ctx.collab.assert_agent_may_act(ends_user_turn=False)
         except TakeoverActive as exc:
             return exc.envelope()
         found = await page.evaluate(_HIGHLIGHT_JS, selector)
@@ -76,7 +78,13 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         Use for credentials, CAPTCHAs, 2FA, or payment confirmation. Highlights
         the relevant element when ``selector`` is given, then returns an
         ``awaiting_user`` envelope. Relay the instruction, then poll the page
-        (read_page / get_url) to detect completion.
+        (read_page / get_url / screenshot / wait_for) to detect completion.
+
+        Until you act again the window is the user's: the pages they open and
+        the forms they send are not measured against your approvals. Your next
+        acting call (click, type_text, navigate, evaluate ...) takes it back, and
+        from then on the page's navigations need your approvals again, so do not
+        act until the step is done.
 
         Requires an attended (headful) session — in headless mode there is no
         user to ask, so this returns ``unattended`` rather than making you wait.
@@ -101,12 +109,19 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             return exc.envelope()
         if selector:
             await page.evaluate(_HIGHLIGHT_JS, selector)
+        # Last, once every check has passed: from here the window's navigations
+        # are the user's (see CollaborationState.user_turn).
+        ctx.collab.hand_to_user()
         ctx.audit.record("ask_user_to_do", {"instruction": instruction, "selector": selector})
         return {
             "status": "awaiting_user",
             "instruction": instruction,
             "selector": selector,
-            "hint": "Relay this to the user; when they finish, re-read the page to continue.",
+            "hint": (
+                "Relay this to the user. Until they finish, only read (read_page, get_url, "
+                "screenshot, wait_for): your next acting call takes the window back, and "
+                "the page's navigations need your approvals again."
+            ),
         }
 
     @mcp.tool
@@ -176,5 +191,6 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             ctx.perms.release_unspent(bought)
         ctx.collab.takeover = False
         ctx.collab.takeover_reason = ""
+        ctx.collab.end_user_turn()
         ctx.audit.record("resume_after_takeover", origin=origin.describe())
         return {"status": "ok", "url": page.url, "title": await page.title()}

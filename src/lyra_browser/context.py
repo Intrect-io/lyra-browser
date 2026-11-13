@@ -119,6 +119,8 @@ async def _release_ownership(ctx: ServerContext, *, close: bool) -> None:
     guard would judge, and charge, against whoever now holds the session.
     """
     ctx.perms.revoke_all()
+    # A step the outgoing holder asked the user to do is not the incoming one's to inherit.
+    ctx.collab.end_user_turn()
     if close:
         await ctx.session.stop()
     ctx.owner_session = None

@@ -470,13 +470,12 @@ class NavigationGuard:
         about what a navigation costs. ``False`` only in enforce mode, and then it is
         counted in ``refusals``.
         """
-        if self._collab is not None and self._collab.takeover:
-            # The user is driving. Grants record what the *agent* was allowed
-            # to do; measuring a person against them refuses them their own
-            # browser — and takeover exists precisely for the passwords,
-            # CAPTCHAs and payments the agent must not do alone, every one of
-            # which is a navigation. The trail says who drove.
-            self._record(intent, True, status="user_driven")
+        driver = self._collab.user_driving if self._collab is not None else ""
+        if driver:
+            # The user is driving. Grants record what the *agent* may do; measuring a
+            # person against them refuses them their own browser, during the very
+            # sign-ins, CAPTCHAs and payments the agent hands over. The trail says who.
+            self._record(intent, True, status="user_driven", reason=driver)
             return True
         allowed = self._perms.check(
             self.session_key,

@@ -219,6 +219,25 @@ async def run_mode(base: str, alt_base: str, *, headless: bool) -> None:
                 == "awaiting_user",
                 "attended session can ask the user",
             )
+            # The user does the step: a click straight on the page, not through a tool,
+            # which reaches the guard as a person's click in the window would. The
+            # form POST holds no SUBMIT grant and still has to go through.
+            live = await ctx.session.page()
+            await live.click("#submit")
+            await live.wait_for_timeout(250)
+            expect(
+                (await tools["get_url"]()).get("title") == "submitted",
+                "the user's own submission goes through after ask_user_to_do",
+            )
+            back = await tools["navigate"](url=base, confirm=True)
+            expect(back.get("title") == "home", "the agent's next action takes the window", back)
+            live = await ctx.session.page()
+            await live.click("#submit")
+            await live.wait_for_timeout(250)
+            expect(
+                (await tools["get_url"]()).get("title") != "submitted",
+                "after that an undeclared submission is blocked again",
+            )
             expect(
                 (await tools["request_takeover"](reason="E2E handoff")).get("status")
                 == "takeover_active",
