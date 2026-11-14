@@ -1833,49 +1833,67 @@ def runnable_now() -> int:
         return 0
 
 
+def _busy() -> subprocess.Popen:
+    return subprocess.Popen(
+        [sys.executable, "-I", "-c", "while True: pass"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
 @contextlib.contextmanager
 def held_load(target: float, *, warmup_s: float = 300.0) -> Iterator[None]:
     """Busy processes until the 1-minute load average reads ``target``, kept for the duration.
 
     Pure CPU (``while True: pass``), no memory to speak of. Each runs in a session of its own
-    and is killed by the handle this function started, never by name. The load average is an
-    exponential average with a 60 s time constant, so it is waited for, not assumed: the
-    caller gets control once it reads at least ``target``, or when the warm-up runs out, which
-    is reported, not hidden (every run records the load it started at).
+    and is killed by the handle this function started, never by name. The host's own load
+    comes and goes (other work shares it), so the count is held by feedback, every 5 s: more
+    busy processes while the average reads below the target, fewer once it reads well above
+    it. The average lags by about a minute, so the caller gets control only once it reads
+    ``target`` (or the warm-up runs out); every run records the load it started at, and runs
+    that started below the target are reported, not hidden.
     """
     if target <= 0:
         yield
         return
-    # What the host carries right now counts (the runnable count of /proc/loadavg, not the
-    # average, which still holds whatever an earlier run left): add enough busy processes
-    # to reach the target on top of it, plus a margin.
-    spawn = max(1, int(target) - runnable_now() + 8)
-    procs = [
-        subprocess.Popen(
-            [sys.executable, "-I", "-c", "while True: pass"],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        for _ in range(spawn)
-    ]
+    procs: list[subprocess.Popen] = [_busy() for _ in range(max(1, int(target) - runnable_now()))]
+    cap = int(2 * target)
+    stop = threading.Event()
+
+    def steer() -> None:
+        while not stop.wait(5.0):
+            load = loadavg_1m()
+            if load < target and len(procs) < cap:
+                for _ in range(max(2, int((target - load) / 4))):
+                    procs.append(_busy())
+            elif load > target + 15 and len(procs) > 1:
+                victim = procs.pop()
+                with contextlib.suppress(OSError):
+                    victim.kill()
+                    victim.wait(timeout=5)
+
+    steering = threading.Thread(target=steer, name="held-load", daemon=True)
+    steering.start()
     try:
         started = time.monotonic()
         while loadavg_1m() < target and time.monotonic() - started < warmup_s:
             time.sleep(5)
         note(
-            f"stress_popup: {spawn} busy processes; load {loadavg_1m():.1f} after "
+            f"stress_popup: {len(procs)} busy processes; load {loadavg_1m():.1f} after "
             f"{time.monotonic() - started:.0f}s of warm-up (target {target:g})"
         )
         yield
     finally:
-        for p in procs:
+        stop.set()
+        steering.join(timeout=10)
+        for proc in procs:
             with contextlib.suppress(OSError):
-                p.kill()
-        for p in procs:
+                proc.kill()
+        for proc in procs:
             with contextlib.suppress(Exception):
-                p.wait(timeout=5)
+                proc.wait(timeout=5)
 
 
 STRESS_CASE = "popup-two-step"
