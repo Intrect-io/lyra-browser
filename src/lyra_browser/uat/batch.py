@@ -20,7 +20,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import sys
+import time
 import uuid
 from collections import Counter
 from collections.abc import Callable
@@ -30,7 +32,7 @@ from typing import Any
 
 from pydantic import Field
 
-from .procs import reap_group, spawn, stop_group
+from .procs import reap_group, spawn, stop_group, sweeper
 from .report import Model, Report
 from .spec import BatchSpec, RunSpec, load_persona
 
@@ -60,6 +62,7 @@ class PersonaResult(Model):
     run_dir: str | None = None
     report_json: str | None = None
     error: str | None = None
+    attempts: int = 1
 
 
 class MatrixRow(Model):
@@ -105,6 +108,50 @@ def new_batch_id(now: datetime | None = None) -> str:
 
 def default_launcher(spec_path: Path) -> list[str]:
     return [sys.executable, "-m", "lyra_browser.uat", "run", str(spec_path)]
+
+
+# Chrome's markers of a profile in use; a copy must not carry them, or the copy's
+# browser would think another one holds it.
+_PROFILE_LOCKS = ("SingletonLock", "SingletonSocket", "SingletonCookie", "profile.lock")
+
+
+def make_disposable_profile(source: Path | None, profiles_dir: Path, name: str) -> Path:
+    """A profile for one attempt: a copy of ``source`` without its lock files, or empty."""
+    target = profiles_dir / name
+    if source is not None and source.exists():
+        shutil.copytree(
+            source, target, symlinks=True, ignore=shutil.ignore_patterns(*_PROFILE_LOCKS)
+        )
+    else:
+        target.mkdir(parents=True)
+    return target
+
+
+class StartLimiter:
+    """At most one child start per ``interval_s`` across the batch."""
+
+    def __init__(self, interval_s: float) -> None:
+        self.interval_s = interval_s
+        self._lock = asyncio.Lock()
+        self._last: float | None = None
+
+    async def wait(self) -> None:
+        if self.interval_s <= 0:
+            return
+        async with self._lock:
+            if self._last is not None:
+                delay = self._last + self.interval_s - time.monotonic()
+                if delay > 0:
+                    await asyncio.sleep(delay)
+            self._last = time.monotonic()
+
+
+RETRIED_EXITS = frozenset({"browser_error", "brain_error", "harness_exit"})
+
+
+def should_retry(result: PersonaResult) -> bool:
+    """A crash or an infrastructure failure, not something the persona met on the site."""
+    return result.status == "crashed" or result.exit_reason in RETRIED_EXITS
 
 
 def build_run_spec(batch: BatchSpec, persona_id: str, runs_dir: Path) -> RunSpec:
@@ -163,12 +210,18 @@ async def _run_child(
     return proc.returncode, stdout, stderr, timed_out
 
 
-def _find_report(stdout: str, runs_dir: Path, persona_id: str) -> Path | None:
+def _find_report(
+    stdout: str, runs_dir: Path, persona_id: str, *, since: float = 0.0
+) -> Path | None:
+    """The report the child printed, else the newest one of the persona written after
+    ``since`` (a retry must never read an earlier attempt's report as its own)."""
     for line in reversed(stdout.strip().splitlines()):
         candidate = Path(line.strip())
         if candidate.name == "report.json" and candidate.is_file():
             return candidate
-    matches = sorted(runs_dir.glob(f"*-{persona_id}-*/report.json"))
+    matches = sorted(
+        p for p in runs_dir.glob(f"*-{persona_id}-*/report.json") if p.stat().st_mtime >= since
+    )
     return matches[-1] if matches else None
 
 
@@ -201,23 +254,75 @@ async def run_persona(
     batch_dir: Path,
     launcher: Launcher,
     semaphore: asyncio.Semaphore,
+    limiter: StartLimiter | None = None,
+) -> tuple[PersonaResult, Report | None]:
+    """Run one persona, again on a crash or an infrastructure failure (``batch.retries``)."""
+    attempt = 1
+    earlier: list[str] = []
+    while True:
+        result, report = await _attempt(
+            batch,
+            persona_id,
+            group,
+            attempt=attempt,
+            batch_dir=batch_dir,
+            launcher=launcher,
+            semaphore=semaphore,
+            limiter=limiter,
+        )
+        result.attempts = attempt
+        result.warnings[:0] = earlier
+        if attempt > batch.retries or not should_retry(result):
+            return result, report
+        why = result.error or result.exit_reason or result.status
+        earlier = [*result.warnings, f"attempt {attempt} failed ({result.status}: {why})"]
+        await asyncio.sleep(batch.retry_delay_s)
+        attempt += 1
+
+
+async def _attempt(
+    batch: BatchSpec,
+    persona_id: str,
+    group: str,
+    *,
+    attempt: int,
+    batch_dir: Path,
+    launcher: Launcher,
+    semaphore: asyncio.Semaphore,
+    limiter: StartLimiter | None,
 ) -> tuple[PersonaResult, Report | None]:
     runs_dir = batch_dir / "runs"
     spec = build_run_spec(batch, persona_id, runs_dir)
-    spec_path = batch_dir / "specs" / f"{persona_id}.json"
-    spec_path.write_text(spec.model_dump_json(indent=2), encoding="utf-8")
-    argv = launcher(spec_path)
-    timeout_s = spec.limits.wall_s + 2 * spec.hooks.timeout_s + CHILD_GRACE_S
-    env = {**os.environ, "LYRA_UAT_BATCH_DIR": str(batch_dir)}
+    name = persona_id if attempt == 1 else f"{persona_id}-attempt{attempt}"
+    profile: Path | None = None
     async with semaphore:
-        code, stdout, stderr, timed_out = await _run_child(
-            argv,
-            cwd=batch_dir,
-            log_base=batch_dir / "logs" / persona_id,
-            timeout_s=timeout_s,
-            env=env,
-        )
-    report_path = _find_report(stdout, runs_dir, persona_id)
+        if limiter is not None:
+            await limiter.wait()
+        if batch.disposable_profiles:
+            profile = make_disposable_profile(
+                batch.data_dirs.get(persona_id), batch_dir / "profiles", name
+            )
+            spec.data_dir = profile
+            sweeper.watch_dir(profile)
+        spec_path = batch_dir / "specs" / f"{name}.json"
+        spec_path.write_text(spec.model_dump_json(indent=2), encoding="utf-8")
+        argv = launcher(spec_path)
+        timeout_s = spec.limits.wall_s + 2 * spec.hooks.timeout_s + CHILD_GRACE_S
+        env = {**os.environ, "LYRA_UAT_BATCH_DIR": str(batch_dir)}
+        started = time.time()
+        try:
+            code, stdout, stderr, timed_out = await _run_child(
+                argv,
+                cwd=batch_dir,
+                log_base=batch_dir / "logs" / name,
+                timeout_s=timeout_s,
+                env=env,
+            )
+        finally:
+            if profile is not None:
+                sweeper.unwatch_dir(profile)
+                shutil.rmtree(profile, ignore_errors=True)
+    report_path = _find_report(stdout, runs_dir, persona_id, since=started - 1)
     if report_path is not None:
         try:
             report = Report.model_validate_json(report_path.read_text(encoding="utf-8"))
@@ -342,13 +447,25 @@ async def run_batch(
     for sub in ("specs", "logs", "runs"):
         (batch_dir / sub).mkdir(parents=True, exist_ok=False if sub == "specs" else True)
     semaphore = asyncio.Semaphore(batch.concurrency)
+    limiter = StartLimiter(batch.start_interval_s)
+    # Killed outright, the batch leaves its children's browsers to the sweeper: every
+    # profile a child launches lives under the batch directory unless data_dirs says so.
+    sweeper.watch_dir(batch_dir)
+    for directory in batch.data_dirs.values():
+        sweeper.watch_dir(directory)
 
     results: list[PersonaResult] = []
     reports: dict[str, Report] = {}
 
     async def one(persona_id: str, group: str) -> None:
         result, report = await run_persona(
-            batch, persona_id, group, batch_dir=batch_dir, launcher=launcher, semaphore=semaphore
+            batch,
+            persona_id,
+            group,
+            batch_dir=batch_dir,
+            launcher=launcher,
+            semaphore=semaphore,
+            limiter=limiter,
         )
         results.append(result)
         if report is not None:
@@ -381,6 +498,9 @@ async def run_batch(
     summary.path, summary.md_path = str(json_path), str(md_path)
     _write_atomic(json_path, summary.model_dump_json(indent=2))
     _write_atomic(md_path, render_markdown(summary))
+    sweeper.unwatch_dir(batch_dir)
+    for directory in batch.data_dirs.values():
+        sweeper.unwatch_dir(directory)
     return summary
 
 

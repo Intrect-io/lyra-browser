@@ -37,6 +37,18 @@ STUB = textwrap.dedent(
     if mode == "crash":
         print("boom: no browser", file=sys.stderr)
         sys.exit(3)
+    if mode == "crash_once":
+        marker = log.with_name(f"crashed-{pid}")
+        if not marker.exists():
+            marker.write_text("x")
+            print("boom: first attempt", file=sys.stderr)
+            sys.exit(3)
+    if mode == "profile":
+        # What the run found in its profile, then dirt for the next one to find.
+        found = sorted(q.name for q in spec.data_dir.iterdir()) if spec.data_dir else None
+        with log.with_name(f"profile-{pid}").open("a") as fh:
+            fh.write(json.dumps({"dir": str(spec.data_dir), "found": found}) + "\\n")
+        (spec.data_dir / "dirt").write_text("left by a run")
     time.sleep(float(spec.persona.goal))
     run_dir = spec.out_dir / f"stub-{pid}-run"
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -231,3 +243,139 @@ async def test_only_restricts_the_run_and_unknown_ids_are_refused(tmp_path, stub
     assert [r.persona_id for r in summary.results] == ["b"]
     with pytest.raises(ValueError, match="not in the batch"):
         await run_batch(batch, only=["zz"], launcher=stub_launcher)
+
+
+@pytest.mark.asyncio
+async def test_a_crash_is_retried_and_the_attempts_are_counted(tmp_path, stub_launcher):
+    batch = make_batch(
+        tmp_path,
+        {"a": persona("a", mode="crash_once"), "b": persona("b", mode="crash")},
+        [{"name": "g", "personas": ["a", "b"]}],
+        retries=2,
+        retry_delay_s=0,
+    )
+    summary = await run_batch(batch, launcher=stub_launcher)
+    by_id = {r.persona_id: r for r in summary.results}
+    assert by_id["a"].status == "completed" and by_id["a"].attempts == 2
+    assert any("attempt 1 failed" in w for w in by_id["a"].warnings)
+    # A child that always crashes is tried 1 + retries times, then reported as crashed.
+    assert by_id["b"].status == "crashed" and by_id["b"].attempts == 3
+    batch_dir = Path(summary.dir)
+    assert (batch_dir / "specs" / "a-attempt2.json").is_file()
+    assert (batch_dir / "logs" / "b-attempt3.err.log").is_file()
+
+
+@pytest.mark.asyncio
+async def test_what_the_persona_met_is_not_retried(tmp_path, stub_launcher):
+    batch = make_batch(
+        tmp_path,
+        {"a": persona("a", mode="unfinished")},
+        [{"name": "g", "personas": ["a"]}],
+        retries=3,
+        retry_delay_s=0,
+    )
+    summary = await run_batch(batch, launcher=stub_launcher)
+    (result,) = summary.results
+    assert result.exit_reason == "no_finish" and result.attempts == 1
+
+
+def test_should_retry_only_infrastructure_failures():
+    from lyra_browser.uat.batch import PersonaResult, should_retry
+
+    def r(status, reason=None):
+        return PersonaResult(persona_id="a", group="g", status=status, exit_reason=reason)
+
+    assert should_retry(r("crashed"))
+    assert should_retry(r("error", "browser_error"))
+    assert should_retry(r("incomplete", "brain_error"))
+    assert should_retry(r("error", "harness_exit"))
+    for reason in ("finish", "budget_exhausted", "wall_timeout", "no_finish", "interrupted"):
+        assert not should_retry(r("incomplete", reason))
+
+
+@pytest.mark.asyncio
+async def test_start_interval_spaces_the_children_of_a_parallel_group(tmp_path, stub_launcher):
+    # Three children of a parallel group, one start per 0.8 s: the batch cannot finish
+    # before the third has been let through (a child's own clock is too noisy to compare:
+    # its interpreter takes a varying time to start).
+    batch = make_batch(
+        tmp_path,
+        {pid: persona(pid) for pid in ("a", "b", "c")},
+        [{"name": "anon", "mode": "parallel", "personas": ["a", "b", "c"]}],
+        start_interval_s=0.8,
+    )
+    summary = await run_batch(batch, launcher=stub_launcher)
+    assert summary.all_completed and summary.duration_s >= 1.6
+
+
+@pytest.mark.asyncio
+async def test_start_limiter_lets_one_start_through_per_interval():
+    import asyncio
+    import time
+
+    from lyra_browser.uat.batch import StartLimiter
+
+    limiter = StartLimiter(0.2)
+    times: list[float] = []
+
+    async def start() -> None:
+        await limiter.wait()
+        times.append(time.monotonic())
+
+    await asyncio.gather(*(start() for _ in range(4)))
+    gaps = [later - earlier for earlier, later in zip(times, times[1:], strict=False)]
+    assert len(gaps) == 3 and all(gap >= 0.19 for gap in gaps), gaps
+
+
+@pytest.mark.asyncio
+async def test_start_limiter_without_an_interval_does_not_wait():
+    import time
+
+    from lyra_browser.uat.batch import StartLimiter
+
+    limiter = StartLimiter(0)
+    started = time.monotonic()
+    for _ in range(5):
+        await limiter.wait()
+    assert time.monotonic() - started < 0.05
+
+
+@pytest.mark.asyncio
+async def test_disposable_profiles_copy_the_seed_and_leave_nothing_behind(tmp_path, stub_launcher):
+    seed = tmp_path / "seed"
+    (seed / "profile" / "Default").mkdir(parents=True)
+    (seed / "profile" / "Default" / "Cookies").write_text("login")
+    (seed / "profile" / "SingletonLock").write_text("held")
+    (seed / "profile.lock").write_text("")
+    batch = make_batch(
+        tmp_path,
+        {"a": persona("a", mode="profile"), "b": persona("b", mode="profile")},
+        [{"name": "g", "personas": ["a", "b", "a"]}],
+        data_dirs={"a": str(seed)},
+        disposable_profiles=True,
+    )
+    summary = await run_batch(batch, launcher=stub_launcher)
+    assert summary.all_completed
+    seen_a = [json.loads(x) for x in (tmp_path / "profile-a").read_text().splitlines()]
+    seen_b = [json.loads(x) for x in (tmp_path / "profile-b").read_text().splitlines()]
+    # Both runs of a got a fresh copy of the seed: no lock files, and no dirt from the first.
+    assert [s["found"] for s in seen_a] == [["profile"], ["profile"]]
+    assert all(Path(s["dir"]) != seed for s in seen_a)
+    # b has no seed: an empty profile of its own.
+    assert seen_b[0]["found"] == []
+    # The seed was never written to, and every copy is gone.
+    assert sorted(q.name for q in (seed / "profile").iterdir()) == ["Default", "SingletonLock"]
+    assert not (seed / "dirt").exists()
+    assert not any((Path(summary.dir) / "profiles").iterdir())
+
+
+def test_make_disposable_profile_skips_lock_files(tmp_path):
+    from lyra_browser.uat.batch import make_disposable_profile
+
+    seed = tmp_path / "seed"
+    (seed / "profile").mkdir(parents=True)
+    for name in ("SingletonLock", "SingletonSocket", "SingletonCookie", "Local State"):
+        (seed / "profile" / name).write_text("x")
+    (seed / "profile.lock").write_text("")
+    copy = make_disposable_profile(seed, tmp_path / "profiles", "a")
+    assert sorted(q.name for q in copy.rglob("*")) == ["Local State", "profile"]
