@@ -83,6 +83,8 @@ def build_config(spec: RunSpec, run_dir: Path) -> Config:
         capture_keep=0,
     )
     cfg.capture_dir = run_dir / "captures"
+    # save_deliverable writes here: the run directory holds everything a run produced.
+    cfg.deliverables_dir = run_dir / "deliverables"
     return cfg
 
 

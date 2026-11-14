@@ -257,6 +257,15 @@ This is POSIX code (process groups, signals). It was run on Linux only: where th
 `/proc` (macOS) it falls back to `killpg` alone for the liveness check, which has not been
 run, and Windows is not supported.
 
+### Task tools in a run
+
+The task tools (`drag`, `evaluate_readonly`, `read_download`, `save_deliverable`,
+`set_emulation`, and `storage` for cookies and web storage) are not offered by default:
+name them in `tools.allow` for a persona whose task needs them. `save_deliverable`
+writes into the run directory (`<run>/deliverables/`), so what a persona produced stays
+with its report. They go through the same consent policy as the rest (`closed` or
+`autonomous`); none of them can send a form or publish.
+
 ## Hooks
 
 `hooks.before` and `hooks.after` are shell commands. A failing `before` (non-zero)

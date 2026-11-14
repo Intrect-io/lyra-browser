@@ -62,6 +62,7 @@ agent loop ──(MCP: stdio/http)──> lyra-browser server ──> Playwright
 | Downloads | `list_downloads` |
 | Forms | `read_form`, `select_option`, `set_editor`, `upload_file`, `read_draft`, `save_draft`, `publish` |
 | Reading | `get_url`, `read_page`, `screenshot`, `read_image` |
+| Tasks | `drag`, `evaluate_readonly`, `read_download`, `save_deliverable`, `set_emulation` |
 | DevTools | `console_messages`, `network_requests`, `network_request`, `page_performance`, `storage`, `export_har`, `evaluate` |
 | Collaboration | `highlight_element`, `ask_user_to_do`, `request_takeover`, `resume_after_takeover` |
 
@@ -397,6 +398,34 @@ no listener does: alerts and `beforeunload` are accepted, `confirm` is dismissed
   written to the audit log.
 - Nothing here judges the answer: accepting a `confirm` that goes on to post a form
   is still stopped where the request leaves unless it was declared (`submits=true`).
+
+### Task tools: drag, a read-only look, downloads, deliverables, place and language
+
+What a task needs beyond reading and clicking (`src/lyra_browser/tools/tasks.py`):
+
+- `drag(source, target)` — presses the pointer on `source`, moves it onto `target` in
+  steps and releases it, after checking both ends as `click` checks its target. Asks to
+  interact, like `hover`. For sliders, sortable lists and boards that follow the pointer.
+- `evaluate_readonly(expression)` — a JavaScript expression that only reads. Chrome
+  evaluates it with `throwOnSideEffect`, so an assignment, a DOM change or a request is
+  refused by the engine before it runs (`refused_side_effect`), not by a pattern match;
+  that is why it needs no approval, unlike `evaluate`. Expressions that name cookies or
+  web storage are refused (`refused_storage`): `storage` reads those and asks before it
+  reveals values.
+- `read_download(filename)` — the content of a file this session saved (text up to
+  50000 characters, or size, SHA-256 and the first bytes of a binary). Nothing else on
+  disk can be named.
+- `save_deliverable(name, content)` — writes a result (an extract, a table) under a
+  plain file name to the session's deliverables directory (`<data dir>/deliverables`, a
+  UAT run's own directory in `lyra-uat`), never over an existing file unless
+  `overwrite=true`, up to 1 MB.
+- `set_emulation(latitude, longitude, accuracy, locale, timezone, clear)` — what pages
+  are told about place and language: `navigator.geolocation` (and the permission it
+  needs), `Intl`/`navigator.language`, the time zone. For this tab and every tab opened
+  after it. `Accept-Language` and the IP address do not change.
+
+Reading cookies and web storage is `storage` (DevTools, below); there is no second tool
+for it. `scripts/verify_task_tools_e2e.py` is the real-browser gate.
 
 ### DevTools: console, network, performance, storage, `evaluate`
 

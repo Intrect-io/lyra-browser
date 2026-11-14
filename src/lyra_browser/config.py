@@ -434,6 +434,8 @@ class Config:
     audit_path: Path = field(init=False)
     # Where captures land — derived like profile_dir, see _default_capture_dir.
     capture_dir: Path = field(init=False)
+    # Where save_deliverable writes. None: ``<data_dir>/deliverables``.
+    deliverables_dir: Path | None = None
     # How many capture files to keep. Every screenshot is a new file, so an
     # agent that looks at the page on every turn would otherwise fill the disk
     # over a long session. Oldest go first; 0 disables pruning.
