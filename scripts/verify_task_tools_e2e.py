@@ -168,7 +168,7 @@ async def main() -> None:
 
             # -- read_download
             ctx.perms.grant("default", site, Capability.DOWNLOAD)
-            saved = await tools["click"](selector="#csv", download=True)
+            saved = await tools["click"](selector="#csv", download=True, confirm=True)
             expect(saved["status"] == "ok" and saved.get("download"), "the CSV is saved", saved)
             read = await tools["read_download"](filename="prices.csv")
             expect(read.get("text") == "plan,price\nStudio,29\n", "and read back", read)
@@ -193,7 +193,7 @@ async def main() -> None:
             expect(json.loads(tz["result"]) == "Europe/Berlin", "time zone too", tz)
             page = await ctx.session.page()
             before = list(ctx.session.open_pages())
-            await page.evaluate("window.open('/other', '_blank')")
+            await page.evaluate("void window.open('/other', '_blank')")
             popup = None
             for _ in range(50):
                 fresh = [p for p in ctx.session.open_pages() if p not in before]

@@ -28,6 +28,7 @@ import contextlib
 import hashlib
 import json
 import re
+import weakref
 from pathlib import Path
 from typing import Any
 
@@ -79,12 +80,27 @@ def _emulation_commands(state: dict[str, Any]) -> list[tuple[str, dict]]:
     return out
 
 
+# One DevTools session per tab for the overrides, kept open: Chrome drops an
+# ``Emulation.*`` override when the session that set it detaches (measured with
+# Playwright, whose ``new_cdp_session`` is a session of its own; the native driver's is
+# the page's own and never detaches). Keyed weakly, so a closed tab takes its entry.
+_EMULATION_SESSIONS: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
+
+
+async def _emulation_session(page: Any) -> Any:
+    session = _EMULATION_SESSIONS.get(page)
+    if session is None:
+        session = await page.context.new_cdp_session(page)
+        _EMULATION_SESSIONS[page] = session
+    return session
+
+
 async def apply_emulation(page: Any, state: dict[str, Any]) -> list[str]:
     """Send the overrides to one tab; the commands that failed, as text."""
     failed = []
     for method, params in _emulation_commands(state):
         try:
-            await cdp_send(page, method, params)
+            await (await _emulation_session(page)).send(method, params)
         except Exception as exc:  # noqa: BLE001 - reported, the rest still applies
             failed.append(f"{method}: {type(exc).__name__}: {exc}"[:200])
     return failed
