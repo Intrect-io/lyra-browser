@@ -20,6 +20,14 @@ Sections (``--only a,b`` picks some; each uses its own data dir and always stops
   speculative speculation rules are a measured limit; back and reload are judged, cache on
   perf        what the guard costs in page-load time against the route backend
 
+Opt-in (never part of the default run):
+
+  stress_popup  the popup two-step (``window.open('about:blank'); w.location = AWAY``) N times
+                with the host's 1-minute load average held at or above a target by busy
+                processes of this script's own (--stress-popup N, --load-target L). Escapes
+                are counted on the server: an AWAY ``GET /dest`` that arrived is an escape,
+                whatever the guard reported.
+
 Output: ``PASS`` lines are assertions (via ``expect``); ``NOTE`` / ``LIMIT`` / ``EXPOSURE``
 lines are measurements that never fail the run. They are repeated at the end for the README.
 
@@ -29,6 +37,8 @@ lines are measurements that never fail the run. They are repeated at the end for
     /path/to/venv-patchright/bin/python scripts/verify_cdp_guard_e2e.py \
         --driver patchright
     .venv/bin/python scripts/verify_cdp_guard_e2e.py --headless-only --only wire,hops
+    .venv/bin/python scripts/verify_cdp_guard_e2e.py --headless-only --driver patchright \\
+        --stress-popup 200 --load-target 50
 """
 
 from __future__ import annotations
@@ -487,6 +497,8 @@ class Env:
     driver: str
     popup_runs: int = 10  # how often every popup scenario of ``scenarios`` is run
     big_upload: bool = False  # ``scenarios`` also posts 40 MB (about 20 s)
+    stress_runs: int = 0  # ``stress_popup``: runs of the popup two-step
+    load_target: float = 0.0  # ``stress_popup``: 1-minute load average to hold during them
 
     @property
     def headless(self) -> bool:
@@ -691,6 +703,15 @@ SECTIONS: dict[str, Callable[[Env], Awaitable[None]]] = {}
 def section(fn: Callable[[Env], Awaitable[None]]) -> Callable[[Env], Awaitable[None]]:
     SECTIONS[fn.__name__.removeprefix("section_")] = fn
     return fn
+
+
+# Sections that only run when named (``--only``) or asked for by their own flag.
+OPT_IN: set[str] = set()
+
+
+def opt_in_section(fn: Callable[[Env], Awaitable[None]]) -> Callable[[Env], Awaitable[None]]:
+    OPT_IN.add(fn.__name__.removeprefix("section_"))
+    return section(fn)
 
 
 # -- 1. existing --------------------------------------------------------------------------
@@ -1796,6 +1817,121 @@ async def section_scenarios(env: Env) -> None:
         raise AssertionError(f"{len(failures)} checks failed: {failures}")
 
 
+# -- 5b. stress_popup (opt-in) ------------------------------------------------------------
+
+
+def loadavg_1m() -> float:
+    """The host's 1-minute load average."""
+    return os.getloadavg()[0]
+
+
+def _busy() -> subprocess.Popen:
+    return subprocess.Popen(
+        [sys.executable, "-I", "-c", "while True: pass"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+@contextlib.contextmanager
+def held_load(target: float, *, warmup_s: float = 300.0) -> Iterator[None]:
+    """Busy processes until the 1-minute load average reads ``target``, kept for the duration.
+
+    ``int(target) + 8`` processes of pure CPU (``while True: pass``, no memory to speak of).
+    Each is always runnable, so on its own the set holds the load average at about its
+    size, whatever else the host does; steering by the average instead lags by a minute
+    and let runs start below the target. Each runs in a session of its own and is killed
+    by the handle this function started, never by name. The average is waited for, not
+    assumed: the caller gets control once it reads ``target`` (or the warm-up runs out),
+    and every run records the load it started at.
+    """
+    if target <= 0:
+        yield
+        return
+    procs = [_busy() for _ in range(int(target) + 8)]
+    try:
+        started = time.monotonic()
+        while loadavg_1m() < target and time.monotonic() - started < warmup_s:
+            time.sleep(5)
+        note(
+            f"stress_popup: {len(procs)} busy processes; load {loadavg_1m():.1f} after "
+            f"{time.monotonic() - started:.0f}s of warm-up (target {target:g})"
+        )
+        yield
+    finally:
+        for proc in procs:
+            with contextlib.suppress(OSError):
+                proc.kill()
+        for proc in procs:
+            with contextlib.suppress(Exception):
+                proc.wait(timeout=5)
+
+
+STRESS_CASE = "popup-two-step"
+
+
+@opt_in_section
+async def section_stress_popup(env: Env) -> None:
+    """The popup two-step, many times, on a loaded host.
+
+    Once, at a load average near 55, two of ten runs let AWAY's ``GET /dest`` reach the
+    server. This section is how that is reproduced or ruled out: every run is checked on the
+    server, and the load average it started at is recorded with it.
+    """
+    runs_wanted = env.stress_runs or env.popup_runs
+    case = next(c for c in build_cases() if c.name == STRESS_CASE)
+    loads: list[float] = []
+    escaped: list[tuple[int, float, list[str]]] = []
+    other: list[tuple[int, list[str]]] = []
+    with world_up() as world:
+        world.pages[case.name] = case.html
+        async with rig(env, "stress_popup") as r:
+            page = await r.page()
+            with held_load(env.load_target):
+                started = time.monotonic()
+                for i in range(runs_wanted):
+                    load = loadavg_1m()
+                    loads.append(load)
+                    run = await run_case(r, world, page, case)
+                    if run["escaped"]:
+                        escaped.append((i, load, run["hits"]))
+                        print(f"  run {i}: ESCAPED at load {load:.1f}: {run['hits']}", flush=True)
+                    problems = [p for p in case_problems(case, run) if not p.startswith("ESC")]
+                    if problems:
+                        other.append((i, problems))
+                    if (i + 1) % 25 == 0:
+                        print(
+                            f"  {i + 1}/{runs_wanted} runs, load {load:.1f}, "
+                            f"{len(escaped)} escaped",
+                            flush=True,
+                        )
+                elapsed = time.monotonic() - started
+    below = sum(1 for load in loads if load < env.load_target)
+    note(
+        f"stress_popup ({env.mode}, driver={env.driver}): {runs_wanted} runs of {STRESS_CASE} "
+        f"in {elapsed:.0f}s, load min {min(loads):.1f} / median "
+        f"{statistics.median(loads):.1f} / max {max(loads):.1f}, {below} runs below the "
+        f"target {env.load_target:g}; escapes {len(escaped)}"
+    )
+    if below:
+        limit(
+            f"stress_popup ({env.mode}): {below}/{runs_wanted} runs started below the load "
+            "target; the escape count holds for all of them, the load claim only for the rest"
+        )
+    expect(
+        not escaped,
+        f"stress_popup ({env.mode}): no AWAY GET /dest reached the server in {runs_wanted} runs",
+        escaped[:5],
+    )
+    expect(
+        not other,
+        f"stress_popup ({env.mode}): every run was refused, audited and left the page alive",
+        other[:5],
+    )
+
+
 # -- 6. workers_sw ------------------------------------------------------------------------
 
 
@@ -2426,7 +2562,10 @@ async def run_sections(env: Env, names: list[str], tee: Tee) -> list[str]:
         before, started = tee.passed, time.monotonic()
         print(f"\n===== [{env.mode}] {name} =====", flush=True)
         try:
-            await asyncio.wait_for(SECTIONS[name](env), SECTION_TIMEOUT_S)
+            timeout = SECTION_TIMEOUT_S
+            if name == "stress_popup":  # warm-up, then a few seconds a run on a loaded host
+                timeout = max(SECTION_TIMEOUT_S, 600 + 10 * (env.stress_runs or env.popup_runs))
+            await asyncio.wait_for(SECTIONS[name](env), timeout)
         except Exception as exc:  # noqa: BLE001 - one broken section must not hide the others
             failures.append(f"{env.mode}/{name}")
             print(f"FAIL  [{env.mode}] {name}: {type(exc).__name__}: {exc}", flush=True)
@@ -2444,7 +2583,9 @@ def has_display() -> bool:
 
 
 async def async_main(args: argparse.Namespace, tee: Tee) -> int:
-    names = [n.strip() for n in args.only.split(",") if n.strip()] or list(SECTIONS)
+    names = [n.strip() for n in args.only.split(",") if n.strip()]
+    if not names:
+        names = ["stress_popup"] if args.stress_popup else [n for n in SECTIONS if n not in OPT_IN]
     unknown = [n for n in names if n not in SECTIONS]
     if unknown:
         print(f"unknown section(s) {unknown}; known: {list(SECTIONS)}", file=sys.stderr)
@@ -2468,6 +2609,8 @@ async def async_main(args: argparse.Namespace, tee: Tee) -> int:
             driver=args.driver,
             popup_runs=args.popup_runs,
             big_upload=args.big_upload,
+            stress_runs=args.stress_popup,
+            load_target=args.load_target,
         )
         failures += await run_sections(env, names, tee)
         print(
@@ -2486,7 +2629,7 @@ async def async_main(args: argparse.Namespace, tee: Tee) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Real-browser gate for the CDP guard backend.",
-        epilog="Sections: " + ", ".join(SECTIONS),
+        epilog="Sections: " + ", ".join(SECTIONS) + "; opt-in: " + ", ".join(sorted(OPT_IN)),
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--headless-only", action="store_true")
@@ -2503,7 +2646,23 @@ def main() -> int:
     parser.add_argument(
         "--big-upload", action="store_true", help="also post 40 MB in scenarios (about 20 s)"
     )
-    parser.add_argument("--only", default="", help="comma separated section names (default: all)")
+    parser.add_argument(
+        "--stress-popup",
+        type=int,
+        default=0,
+        metavar="N",
+        help="run only stress_popup: the popup two-step N times under --load-target",
+    )
+    parser.add_argument(
+        "--load-target",
+        type=float,
+        default=0.0,
+        metavar="L",
+        help="stress_popup: hold the 1-minute load average at L or above (0: the host as it is)",
+    )
+    parser.add_argument(
+        "--only", default="", help="comma separated section names (default: all but opt-in)"
+    )
     args = parser.parse_args()
     # Everything is built from this: build_tools reads it when it makes a Config.
     os.environ["LYRA_BROWSER_GUARD"] = "cdp"
