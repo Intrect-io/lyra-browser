@@ -6,8 +6,11 @@ brain against the same spec, so no model is involved, and compares what decides 
 its status and exit reason, the outcome ``finish`` reported, the steps it spent and every
 assertion's status. Same judgement means the site behaved the same for the same actions.
 
-Arguments the audit redacts (typed values of password-like fields) cannot be replayed as
-typed; a replay that contains one says so (``exact`` is False) rather than pretend.
+The trace is written through the audit's redaction, which hides every typed value
+(``type_text``'s ``value`` among them): such a step cannot be replayed as it was typed,
+and typing the placeholder instead would be a different action. The replay stops before
+the first one and says so (``exact`` False, ``stopped_at`` its step number); its
+judgement is then that of a shorter run and is compared all the same.
 """
 
 from __future__ import annotations
@@ -33,14 +36,15 @@ def judgement(report: Report) -> dict[str, Any]:
     }
 
 
-def script_from(report: Report) -> tuple[list[dict[str, Any]], bool]:
-    """The trace as a scripted brain's script, and whether every argument is intact."""
-    script, exact = [], True
+def script_from(report: Report) -> tuple[list[dict[str, Any]], int | None]:
+    """The trace as a scripted brain's script, up to the first step whose arguments were
+    redacted (whose number is returned, None when every step is intact)."""
+    script: list[dict[str, Any]] = []
     for step in report.trace:
         if any(isinstance(v, str) and v.startswith(REDACTED) for v in step.args.values()):
-            exact = False
+            return script, step.n
         script.append({"tool": step.tool, "args": dict(step.args)})
-    return script, exact
+    return script, None
 
 
 async def replay_run(run_dir: Path, *, out_dir: Path | None = None) -> dict[str, Any]:
@@ -50,9 +54,9 @@ async def replay_run(run_dir: Path, *, out_dir: Path | None = None) -> dict[str,
     run_dir = run_dir.resolve()
     original = Report.model_validate_json((run_dir / "report.json").read_text(encoding="utf-8"))
     spec, _ = read_run_file(run_dir / RUN_FILE)
-    script, exact = script_from(original)
+    script, stopped_at = script_from(original)
     if not script:
-        raise ValueError(f"{run_dir}: the trace is empty, there is nothing to replay")
+        raise ValueError(f"{run_dir}: no step of the trace can be replayed")
     replayed_spec = spec.model_copy(
         update={
             "brain": spec.brain.model_copy(
@@ -70,7 +74,8 @@ async def replay_run(run_dir: Path, *, out_dir: Path | None = None) -> dict[str,
         "original": str(run_dir / "report.json"),
         "replay": replayed.artifacts.report_json,
         "same": not differences,
-        "exact": exact,
+        "exact": stopped_at is None,
+        "stopped_at": stopped_at,
         "judgement": before,
         "differences": differences,
     }

@@ -93,6 +93,22 @@ async def evaluate_once(ctx: Any, recorder: Any) -> None:
     if not recorder.assertions or recorder.asserts_done:
         return
     recorder.asserts_done = True
+    if not getattr(ctx.session, "_launched_once", True):
+        # ``page()`` would open a browser that was never opened, only to judge it.
+        recorder.add_asserts(
+            [
+                {
+                    "id": a.id,
+                    "kind": a.kind,
+                    "status": "not_evaluated",
+                    "expected": a.describe(),
+                    "observed": None,
+                    "error": "the browser was never opened",
+                }
+                for a in recorder.assertions
+            ]
+        )
+        return
     try:
         page = await ctx.session.page(revive=False)
     except Exception as exc:  # noqa: BLE001 - no page is a result

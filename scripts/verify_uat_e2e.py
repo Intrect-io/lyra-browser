@@ -119,7 +119,6 @@ async def completed_run(base: str, alt_base: str, out: Path) -> None:
         budget=10,
         script=script,
         hooks={"before": "echo seeded $LYRA_UAT_PERSONA", "after": "echo checked"},
-        asserts=ASSERTS,
     )
     report = await run_spec(spec)
     run_dir = Path(report.artifacts.dir)
@@ -183,7 +182,6 @@ async def completed_run(base: str, alt_base: str, out: Path) -> None:
     )
     expect((run_dir / "browser" / "audit.jsonl").is_file(), "run has its own audit log")
     expect((run_dir / "browser" / "profile").is_dir(), "run has its own browser profile")
-    await judged_exported_and_replayed(report)
 
 
 # What the pricing page shows after "Buy Studio": its click sets the title to "bought".
@@ -197,9 +195,22 @@ ASSERTS = [
 ]
 
 
-async def judged_exported_and_replayed(report) -> None:
+async def judged_exported_and_replayed(base: str, out: Path) -> None:
+    """Assertions, the export and a replay, on a run of their own: straight to the pricing
+    page by URL, then "Buy Studio", then finish."""
     from lyra_browser.uat.export import committed_schema, export_report
     from lyra_browser.uat.replay import replay_run
+    from lyra_browser.uat.runner import run_spec
+
+    script = [
+        {"tool": "navigate", "args": {"url": base}, "expect": "ok"},
+        {"tool": "navigate", "args": {"url": f"{base}pricing"}, "expect": "ok"},
+        {"tool": "click", "args": {"selector": "#buy"}, "expect": "ok"},
+        {"tool": "finish", "args": {"outcome": "reached_goal", "summary": "Bought."}},
+    ]
+    report = await run_spec(spec_for(base, out, budget=5, script=script, asserts=ASSERTS))
+    print(report.one_line())
+    expect(report.run.exit_reason == "finish", "judged run finished", report.brain.error)
 
     statuses = {a.id: a.status for a in report.asserts}
     expect(
@@ -226,8 +237,11 @@ async def judged_exported_and_replayed(report) -> None:
         print("PASS  export validates against schemas/export.v1.json")
     expect(record.success is False and record.task_id == "e2e", "export record", record.success)
     result = await replay_run(Path(report.artifacts.dir))
-    expect(result["same"], "replay reaches the same judgement", result["differences"])
-    print(f"NOTE  replay exact={result['exact']} (typed values the audit redacts are not exact)")
+    expect(
+        result["same"] and result["exact"],
+        "replay of every step reaches the same judgement",
+        result,
+    )
 
 
 async def budget_run(base: str, out: Path) -> None:
@@ -258,6 +272,7 @@ async def main(keep: bool) -> None:
         print(f"demo site {base}, runs in {out}")
         await completed_run(base, alt_base, out)
         await budget_run(base, out)
+        await judged_exported_and_replayed(base, out)
     finally:
         server.shutdown()
         if keep:

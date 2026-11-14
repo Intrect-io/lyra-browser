@@ -371,6 +371,7 @@ async def test_replay_reaches_the_same_judgement_and_says_when_it_does_not(fake_
     fake_browser.url = "about:blank"
     result = await replay_run(Path(original.artifacts.dir))
     assert result["same"] is True and result["exact"] is True, result
+    assert result["stopped_at"] is None
     assert result["judgement"]["asserts_passed"] is True
     replayed = Report.model_validate_json(Path(result["replay"]).read_text(encoding="utf-8"))
     assert replayed.brain.backend == "scripted"
@@ -391,15 +392,13 @@ async def test_replay_reaches_the_same_judgement_and_says_when_it_does_not(fake_
         assert record["task_id"] == "p1" and record["success"] is True
 
 
-def test_replay_marks_redacted_arguments_as_inexact(tmp_path):
+def test_replay_stops_before_a_step_whose_value_was_redacted(tmp_path):
     from lyra_browser.uat.replay import script_from
 
     report = Report.model_validate(_minimal_report(tmp_path))
-    script, exact = script_from(report)
-    assert exact is False
-    assert script == [
-        {"tool": "type_text", "args": {"selector": "#pw", "value": "<redacted:8 chars>"}}
-    ]
+    script, stopped_at = script_from(report)
+    assert stopped_at == 2
+    assert script == [{"tool": "navigate", "args": {"url": ENTRY}}]
 
 
 def _minimal_report(tmp_path: Path) -> dict:
@@ -410,8 +409,21 @@ def _minimal_report(tmp_path: Path) -> dict:
     spec = spec_for(tmp_path, [{"tool": "finish", "args": {}}])
     run_dir = tmp_path / "r"
     run_dir.mkdir()
-    row = {
+    first = {
         "n": 1,
+        "ts": "t",
+        "tool": "navigate",
+        "args": {"url": ENTRY},
+        "status": "ok",
+        "action": True,
+        "counted": False,
+        "system": True,
+        "url_before": "",
+        "url_after": ENTRY,
+        "result_head": "",
+    }
+    row = {
+        "n": 2,
         "ts": "t",
         "tool": "type_text",
         "args": {"selector": "#pw", "value": "<redacted:8 chars>"},
@@ -423,7 +435,7 @@ def _minimal_report(tmp_path: Path) -> dict:
         "url_after": ENTRY,
         "result_head": "",
     }
-    (run_dir / "trace.jsonl").write_text(json.dumps(row) + "\n")
+    (run_dir / "trace.jsonl").write_text(json.dumps(first) + "\n" + json.dumps(row) + "\n")
     now = datetime.now(UTC)
     report = build_report(
         spec,
