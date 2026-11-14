@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastmcp import FastMCP
 
 from ..context import ServerContext
+from ..uat.asserts import evaluate_once
 from ..uat.recorder import RunRecorder
 
 SEVERITIES = ("blocker", "major", "minor")
@@ -128,6 +129,8 @@ def register(mcp: FastMCP, ctx: ServerContext, recorder: RunRecorder) -> None:
             return bad
         if not summary.strip():
             return {"status": "error", "reason": "summary must not be empty."}
+        # The page the persona finished on is the page the spec's assertions judge.
+        await evaluate_once(ctx, recorder)
         recorder.set_finish(
             outcome=outcome,
             summary=summary,

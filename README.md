@@ -1049,7 +1049,7 @@ lyra-uat run examples/uat/demo/run.yaml      # one persona, Claude Code plays it
 lyra-uat batch examples/uat/demo/batch.yaml  # two personas in parallel, one process each
 ```
 
-A run leaves a directory: `report.json` (and `report.md`), `trace.jsonl`, `events.jsonl`, `captures/`, `network.jsonl`, `console.jsonl`, and the browser's own `audit.jsonl`. Persona, target, brain, hooks and limits are YAML or JSON; `lyra-uat schema run|batch|report` prints the JSON Schemas. A run that should act without anyone to ask sets `target.policy: autonomous`; the default is `closed`, which keeps the run on its trusted sites. Details, the report format and each brain's requirements are in [docs/UAT.md](https://github.com/Intrect-io/lyra-browser/blob/master/docs/UAT.md).
+A run leaves a directory: `report.json` (and `report.md`), `trace.jsonl`, `events.jsonl`, `captures/`, `network.jsonl`, `console.jsonl`, and the browser's own `audit.jsonl`. Persona, target, brain, hooks and limits are YAML or JSON; `lyra-uat schema run|batch|report|export` prints the JSON Schemas. Spec `asserts` judge the final page without the model; `lyra-uat export` writes a versioned record for a benchmark and `lyra-uat replay` re-runs a run's own calls to check the judgement holds. A run that should act without anyone to ask sets `target.policy: autonomous`; the default is `closed`, which keeps the run on its trusted sites. Details, the report format and each brain's requirements are in [docs/UAT.md](https://github.com/Intrect-io/lyra-browser/blob/master/docs/UAT.md).
 
 ## Headless mode
 

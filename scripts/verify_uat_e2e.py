@@ -32,7 +32,15 @@ def expect(condition: bool, message: str, detail: object = "") -> None:
     print(f"PASS  {message}")
 
 
-def spec_for(base: str, out: Path, *, budget: int, script: list[dict], hooks: dict | None = None):
+def spec_for(
+    base: str,
+    out: Path,
+    *,
+    budget: int,
+    script: list[dict],
+    hooks: dict | None = None,
+    asserts: list[dict] | None = None,
+):
     from lyra_browser.uat.spec import RunSpec
 
     origin = base.rstrip("/")
@@ -54,6 +62,7 @@ def spec_for(base: str, out: Path, *, budget: int, script: list[dict], hooks: di
             },
             "brain": {"backend": "scripted", "script": script},
             "hooks": hooks or {},
+            "asserts": asserts or [],
             "out_dir": str(out),
             "headless": True,
         }
@@ -175,6 +184,66 @@ async def completed_run(base: str, alt_base: str, out: Path) -> None:
     expect((run_dir / "browser" / "profile").is_dir(), "run has its own browser profile")
 
 
+# What the pricing page shows after "Buy Studio": its click sets the title to "bought".
+ASSERTS = [
+    {"id": "on-pricing", "kind": "url_matches", "value": "/pricing$"},
+    {"id": "bought", "kind": "title_contains", "value": "bought"},
+    {"id": "button", "kind": "text_present", "value": "Buy Studio", "selector": "#buy"},
+    {"id": "one-button", "kind": "selector_count", "selector": "#buy", "min": 1, "max": 1},
+    {"id": "no-free-plan", "kind": "text_absent", "value": "Free forever"},
+    {"id": "no-cart", "kind": "selector_count", "selector": ".cart-item", "min": 1},
+]
+
+
+async def judged_exported_and_replayed(base: str, out: Path) -> None:
+    """Assertions, the export and a replay, on a run of their own: straight to the pricing
+    page by URL, then "Buy Studio", then finish."""
+    from lyra_browser.uat.export import committed_schema, export_report
+    from lyra_browser.uat.replay import replay_run
+    from lyra_browser.uat.runner import run_spec
+
+    script = [
+        {"tool": "navigate", "args": {"url": base}, "expect": "ok"},
+        {"tool": "navigate", "args": {"url": f"{base}pricing"}, "expect": "ok"},
+        {"tool": "click", "args": {"selector": "#buy"}, "expect": "ok"},
+        {"tool": "finish", "args": {"outcome": "reached_goal", "summary": "Bought."}},
+    ]
+    report = await run_spec(spec_for(base, out, budget=5, script=script, asserts=ASSERTS))
+    print(report.one_line())
+    expect(report.run.exit_reason == "finish", "judged run finished", report.brain.error)
+
+    statuses = {a.id: a.status for a in report.asserts}
+    expect(
+        statuses
+        == {
+            "on-pricing": "passed",
+            "bought": "passed",
+            "button": "passed",
+            "one-button": "passed",
+            "no-free-plan": "passed",
+            "no-cart": "failed",
+        },
+        "assertions judged on the finished page by the server",
+        [(a.id, a.status, a.observed, a.error) for a in report.asserts],
+    )
+    expect(report.asserts_passed is False, "one failed assertion fails the judgement")
+    record = export_report(report)
+    try:
+        import jsonschema
+    except ImportError:
+        print("NOTE  jsonschema is not installed: the export is checked by its model only")
+    else:
+        jsonschema.validate(record.model_dump(mode="json"), committed_schema())
+        print("PASS  export validates against schemas/export.v1.json")
+    expect(record.success is False and record.task_id == "e2e", "export record", record.success)
+    result = await replay_run(Path(report.artifacts.dir))
+    expect(
+        result["same"] and result["exact"],
+        "replay of every step reaches the same judgement",
+        result,
+    )
+
+
 async def budget_run(base: str, out: Path) -> None:
     from lyra_browser.uat.runner import run_spec
 
@@ -203,6 +272,7 @@ async def main(keep: bool) -> None:
         print(f"demo site {base}, runs in {out}")
         await completed_run(base, alt_base, out)
         await budget_run(base, out)
+        await judged_exported_and_replayed(base, out)
     finally:
         server.shutdown()
         if keep:

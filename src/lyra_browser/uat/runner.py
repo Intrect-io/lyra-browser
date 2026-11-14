@@ -17,6 +17,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .asserts import evaluate_once
 from .brains import BrainError, BrainSession, HarnessBrain, LoopBrain, ToolSpec, make_brain
 from .prompt import build_system_prompt, build_task_prompt
 from .report import BrainInfo, ExitReason, HookResult, Hooks, Report, build_report, write_report
@@ -108,6 +109,11 @@ async def _run_loop_brain(
                 reason = "brain_error"
                 info = BrainInfo(backend=brain.backend, error=f"{type(exc).__name__}: {exc}")
     finally:
+        # A run that never called finish is judged on the page it was left on.
+        try:
+            await evaluate_once(ctx, recorder)
+        except Exception as exc:  # noqa: BLE001 - the report must still be written
+            print(f"lyra-uat: checking the assertions failed: {exc!r}", file=sys.stderr)
         try:
             await ctx.session.stop()
         except Exception as exc:  # noqa: BLE001 — closing is best effort at this point

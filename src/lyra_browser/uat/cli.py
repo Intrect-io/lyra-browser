@@ -5,8 +5,10 @@ Subcommands::
     lyra-uat run <spec> [--target FILE] [--brain NAME] [--model M] [--out DIR] ...
     lyra-uat batch <batch.yaml>
     lyra-uat validate <spec>
-    lyra-uat schema [run|batch|report]
+    lyra-uat schema [run|batch|report|export]
     lyra-uat render <report.json>
+    lyra-uat export <run dir | report.json> [--out FILE]
+    lyra-uat replay <run dir> [--out DIR]
 
 Exit codes of ``run``: 0 when the run completed (findings or not), 2 when it
 was cut off (budget, wall clock, harness) or the brain never finished, 130 when
@@ -66,10 +68,22 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--target", type=Path)
 
     schema = sub.add_parser("schema", help="Print a JSON Schema.")
-    schema.add_argument("which", nargs="?", default="report", choices=["run", "batch", "report"])
+    schema.add_argument(
+        "which", nargs="?", default="report", choices=["run", "batch", "report", "export"]
+    )
 
     render = sub.add_parser("render", help="Render report.json as Markdown to stdout.")
     render.add_argument("report", type=Path)
+
+    export = sub.add_parser("export", help="Write a run as a versioned export record.")
+    export.add_argument("report", type=Path, help="A run directory or its report.json.")
+    export.add_argument("--out", type=Path, help="File to write (default: stdout).")
+
+    replay = sub.add_parser(
+        "replay", help="Run a recorded run again with its own tool calls and compare."
+    )
+    replay.add_argument("run_dir", type=Path)
+    replay.add_argument("--out", type=Path, help="Where the replay's run goes (default: beside).")
 
     demo = sub.add_parser(
         "demo-site", help="Serve the built-in demo site to run a persona against."
@@ -209,6 +223,10 @@ def cmd_schema(args: argparse.Namespace) -> int:
         schema = RunSpec.model_json_schema()
     elif args.which == "batch":
         schema = BatchSpec.model_json_schema()
+    elif args.which == "export":
+        from .export import export_schema
+
+        schema = export_schema()
     else:
         from .report import Report
 
@@ -225,6 +243,27 @@ def cmd_render(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    from .export import export_report, load_report
+
+    record = export_report(load_report(args.report)).model_dump_json(indent=2)
+    if args.out:
+        args.out.write_text(record, encoding="utf-8")
+        print(args.out)
+    else:
+        print(record)
+    return EXIT_OK
+
+
+def cmd_replay(args: argparse.Namespace) -> int:
+    """0 when the replay reached the same judgement, 2 when it did not."""
+    from .replay import replay_run
+
+    result = asyncio.run(replay_run(args.run_dir, out_dir=args.out))
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return EXIT_OK if result["same"] else EXIT_INCOMPLETE
+
+
 def cmd_demo_site(args: argparse.Namespace) -> int:
     from .demo_site import serve_forever
 
@@ -238,6 +277,8 @@ _COMMANDS = {
     "validate": cmd_validate,
     "schema": cmd_schema,
     "render": cmd_render,
+    "export": cmd_export,
+    "replay": cmd_replay,
     "demo-site": cmd_demo_site,
 }
 
