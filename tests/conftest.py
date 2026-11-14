@@ -202,6 +202,18 @@ class FakeKeyboard:
 class FakeMouse:
     def __init__(self, page: FakePage) -> None:
         self._page = page
+        self.x = 0.0
+        self.y = 0.0
+
+    async def down(self, button: str = "left", click_count: int = 1) -> None:
+        self._page.calls.append(("mouse_down",))
+
+    async def up(self, button: str = "left", click_count: int = 1) -> None:
+        self._page.calls.append(("mouse_up",))
+
+    async def move(self, x: float, y: float, steps: int = 1) -> None:
+        self.x, self.y = x, y
+        self._page.calls.append(("mouse_move", x, y))
 
     async def wheel(self, delta_x: float, delta_y: float) -> None:
         self._page.calls.append(("wheel", delta_x, delta_y))
@@ -214,6 +226,9 @@ class FakeBrowserContext:
     """What ``page.context`` offers the storage tool: the cookies a URL would send."""
 
     def __init__(self) -> None:
+        self.cdp_calls: list[tuple[str, dict]] = []
+        self.cdp_answers: dict[str, Any] = {}
+        self.granted: list[list[str]] = []
         self.cookie_jar: list[dict] = [
             {
                 "name": "sid",
@@ -229,6 +244,28 @@ class FakeBrowserContext:
 
     async def cookies(self, urls: Any = None) -> list[dict]:
         return list(self.cookie_jar)
+
+    async def new_cdp_session(self, page: Any) -> FakeCDPSession:
+        return FakeCDPSession(self)
+
+    async def grant_permissions(self, permissions: list[str], origin: str | None = None) -> None:
+        self.granted.append(list(permissions))
+
+
+class FakeCDPSession:
+    """``context.new_cdp_session(page)``: every command is recorded on the context and
+    answered from ``cdp_answers`` (a dict, or a callable of the params), else ``{}``."""
+
+    def __init__(self, context: FakeBrowserContext) -> None:
+        self._context = context
+
+    async def send(self, method: str, params: dict | None = None) -> dict:
+        self._context.cdp_calls.append((method, params or {}))
+        answer = self._context.cdp_answers.get(method, {})
+        return answer(params or {}) if callable(answer) else answer
+
+    async def detach(self) -> None:
+        pass
 
 
 class FakeRequest:
@@ -693,6 +730,8 @@ class FakeSession:
         """The open tabs, oldest first - what ``BrowserSession.open_pages`` reports."""
         self.active_channel = "chrome"
         self.active_driver = "playwright"
+        # What BrowserSession calls for each tab it adopts (observers, set_emulation).
+        self.page_observers: list = []
         self.started = True
         """A fake that hands out a page is, by definition, an open window."""
         self.starting = False

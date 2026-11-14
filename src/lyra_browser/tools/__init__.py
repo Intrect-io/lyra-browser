@@ -19,6 +19,7 @@ from . import (
     navigation,
     reading,
     tabs,
+    tasks,
     waiting,
 )
 
@@ -34,3 +35,4 @@ def register_all(mcp: FastMCP, ctx: ServerContext) -> None:
     downloads.register(mcp, ctx)
     collaboration.register(mcp, ctx)
     devtools.register(mcp, ctx)
+    tasks.register(mcp, ctx)
