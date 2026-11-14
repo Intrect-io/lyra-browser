@@ -1825,14 +1825,6 @@ def loadavg_1m() -> float:
     return os.getloadavg()[0]
 
 
-def runnable_now() -> int:
-    """Processes runnable at this instant (the fourth field of /proc/loadavg), 0 if unknown."""
-    try:
-        return int(Path("/proc/loadavg").read_text().split()[3].split("/")[0])
-    except (OSError, IndexError, ValueError):
-        return 0
-
-
 def _busy() -> subprocess.Popen:
     return subprocess.Popen(
         [sys.executable, "-I", "-c", "while True: pass"],
@@ -1847,35 +1839,18 @@ def _busy() -> subprocess.Popen:
 def held_load(target: float, *, warmup_s: float = 300.0) -> Iterator[None]:
     """Busy processes until the 1-minute load average reads ``target``, kept for the duration.
 
-    Pure CPU (``while True: pass``), no memory to speak of. Each runs in a session of its own
-    and is killed by the handle this function started, never by name. The host's own load
-    comes and goes (other work shares it), so the count is held by feedback, every 5 s: more
-    busy processes while the average reads below the target, fewer once it reads well above
-    it. The average lags by about a minute, so the caller gets control only once it reads
-    ``target`` (or the warm-up runs out); every run records the load it started at, and runs
-    that started below the target are reported, not hidden.
+    ``int(target) + 8`` processes of pure CPU (``while True: pass``, no memory to speak of).
+    Each is always runnable, so on its own the set holds the load average at about its
+    size, whatever else the host does; steering by the average instead lags by a minute
+    and let runs start below the target. Each runs in a session of its own and is killed
+    by the handle this function started, never by name. The average is waited for, not
+    assumed: the caller gets control once it reads ``target`` (or the warm-up runs out),
+    and every run records the load it started at.
     """
     if target <= 0:
         yield
         return
-    procs: list[subprocess.Popen] = [_busy() for _ in range(max(1, int(target) - runnable_now()))]
-    cap = int(2 * target)
-    stop = threading.Event()
-
-    def steer() -> None:
-        while not stop.wait(5.0):
-            load = loadavg_1m()
-            if load < target and len(procs) < cap:
-                for _ in range(max(2, int((target - load) / 4))):
-                    procs.append(_busy())
-            elif load > target + 15 and len(procs) > 1:
-                victim = procs.pop()
-                with contextlib.suppress(OSError):
-                    victim.kill()
-                    victim.wait(timeout=5)
-
-    steering = threading.Thread(target=steer, name="held-load", daemon=True)
-    steering.start()
+    procs = [_busy() for _ in range(int(target) + 8)]
     try:
         started = time.monotonic()
         while loadavg_1m() < target and time.monotonic() - started < warmup_s:
@@ -1886,8 +1861,6 @@ def held_load(target: float, *, warmup_s: float = 300.0) -> Iterator[None]:
         )
         yield
     finally:
-        stop.set()
-        steering.join(timeout=10)
         for proc in procs:
             with contextlib.suppress(OSError):
                 proc.kill()
