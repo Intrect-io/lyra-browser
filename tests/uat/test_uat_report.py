@@ -288,3 +288,119 @@ def test_markdown_flags_a_clean_run_without_a_trace(tmp_path):
     run_dir, audit = make_run(tmp_path, events=[FINISH], trace=[])
     text = render_markdown(build(spec, run_dir, audit))
     assert "none reported (and no trace: not a clean run)" in text
+
+
+# --- assertions and the export record ------------------------------------------------
+
+ASSERTS = [
+    {"id": "done", "kind": "url_matches", "value": "/done"},
+    {"id": "paid", "kind": "text_present", "value": "Paid"},
+]
+
+
+def test_assertions_never_checked_are_not_evaluated_and_judge_nothing(tmp_path):
+    spec = spec_with(asserts=ASSERTS)
+    run_dir, audit = make_run(tmp_path, events=[FINISH])
+    report = build(spec, run_dir, audit)
+    assert [a.status for a in report.asserts] == ["not_evaluated", "not_evaluated"]
+    assert report.asserts_passed is False
+    assert "NOT all passed" in render_markdown(report)
+
+
+def test_recorded_assertions_reach_the_report_and_their_conjunction_is_the_judgement(tmp_path):
+    spec = spec_with(asserts=ASSERTS)
+    results = [
+        {"id": "done", "kind": "url_matches", "status": "passed", "expected": "x", "observed": "u"},
+        {"id": "paid", "kind": "text_present", "status": "passed", "expected": "y", "observed": 1},
+    ]
+    run_dir, audit = make_run(tmp_path, events=[{"type": "asserts", "results": results}, FINISH])
+    report = build(spec, run_dir, audit)
+    assert report.asserts_passed is True and [a.id for a in report.asserts] == ["done", "paid"]
+    # No assertions in the spec: no judgement either way.
+    run_dir2, audit2 = make_run(tmp_path / "b", events=[FINISH])
+    assert build(spec_with(), run_dir2, audit2).asserts_passed is None
+
+
+def test_an_assertion_spec_must_be_complete():
+    import pytest
+    from pydantic import ValidationError
+
+    from lyra_browser.uat.spec import Assertion
+
+    for bad in (
+        {"id": "a", "kind": "text_present"},  # no value
+        {"id": "a", "kind": "selector_count", "selector": ".x"},  # no bound
+        {"id": "a", "kind": "selector_count", "min": 1},  # no selector
+        {"id": "a", "kind": "url_matches", "value": "("},  # not a regular expression
+        {"id": "a", "kind": "looks_nice", "value": "x"},
+    ):
+        with pytest.raises(ValidationError):
+            Assertion.model_validate(bad)
+    ok = Assertion.model_validate({"id": "n", "kind": "selector_count", "selector": "li", "max": 3})
+    assert ok.describe() == "count(li) <= 3"
+
+
+async def test_evaluate_reads_url_title_text_and_counts_from_the_page():
+    from lyra_browser.uat.asserts import evaluate
+    from lyra_browser.uat.spec import Assertion
+
+    class Page:
+        url = "https://shop.example/done?id=1"
+
+        async def title(self):
+            return "Order complete"
+
+        async def evaluate(self, expression, selector):
+            if selector == "bad[":
+                return {"text": "", "count": 0, "error": "not a valid selector"}
+            if selector == ".item":
+                return {"text": "a\nb", "count": 2, "error": None}
+            return {"text": "Thank you. Paid.", "count": None, "error": None}
+
+    checks = [
+        Assertion(id="u", kind="url_matches", value=r"/done\?id=\d+$"),
+        Assertion(id="t", kind="title_contains", value="complete"),
+        Assertion(id="p", kind="text_present", value="Paid"),
+        Assertion(id="e", kind="text_absent", value="Error"),
+        Assertion(id="c", kind="selector_count", selector=".item", min=1, max=1),
+        Assertion(id="s", kind="text_present", value="x", selector="bad["),
+    ]
+    rows = {r["id"]: r for r in await evaluate(Page(), checks)}
+    assert {k: r["status"] for k, r in rows.items()} == {
+        "u": "passed",
+        "t": "passed",
+        "p": "passed",
+        "e": "passed",
+        "c": "failed",
+        "s": "error",
+    }
+    assert rows["c"]["observed"] == 2 and "selector" in rows["s"]["error"]
+
+
+def test_the_committed_export_schema_is_the_models_schema():
+    """A change of the export's shape must be a new version file, not a silent edit."""
+    from lyra_browser.uat.export import committed_schema, export_schema
+
+    assert committed_schema() == export_schema()
+
+
+def test_an_export_validates_and_a_broken_one_does_not(tmp_path):
+    import pytest
+
+    from lyra_browser.uat.export import ExportV1, committed_schema, export_report
+
+    spec = spec_with(asserts=ASSERTS[:1])
+    results = [
+        {"id": "done", "kind": "url_matches", "status": "failed", "expected": "x", "observed": "u"}
+    ]
+    run_dir, audit = make_run(tmp_path, events=[{"type": "asserts", "results": results}, FINISH])
+    record = export_report(build(spec, run_dir, audit))
+    assert record.success is False and record.claimed_outcome == "partial"
+    assert record.final_url == "https://example.com/pricing" and len(record.steps) == 3
+    payload = json.loads(record.model_dump_json())
+    ExportV1.model_validate(payload)
+    jsonschema = pytest.importorskip("jsonschema")
+    jsonschema.validate(payload, committed_schema())
+    payload["version"] = 2
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(payload, committed_schema())

@@ -131,6 +131,15 @@ class Note(Model):
     text: str
 
 
+class AssertResult(Model):
+    id: str
+    kind: str
+    status: Literal["passed", "failed", "error", "not_evaluated"]
+    expected: str
+    observed: Any = None
+    error: str | None = None
+
+
 class PolicyEvent(Model):
     step: int
     kind: str
@@ -223,6 +232,10 @@ class Report(Model):
     side_effects: SideEffects
     policy: Policy
     observations: Observations | None = None
+    # The spec's assertions on the page the run ended on, and their conjunction: True when
+    # every one passed, False when any did not, None when the spec has none.
+    asserts: list[AssertResult] = Field(default_factory=list)
+    asserts_passed: bool | None = None
     metrics: Metrics = Field(default_factory=Metrics)
     warnings: list[str] = Field(default_factory=list)
     hooks: Hooks
@@ -328,6 +341,23 @@ def enforced_policies(spec: RunSpec) -> list[str]:
     return rules
 
 
+def _assert_results(spec: RunSpec, events: list[dict[str, Any]]) -> list[AssertResult]:
+    """What the server recorded for the spec's assertions; one it never got to (the
+    browser died first, a harness exited without finish) is ``not_evaluated``."""
+    recorded = next((e for e in reversed(events) if e.get("type") == "asserts"), None)
+    by_id = {str(r.get("id")): r for r in (recorded or {}).get("results", [])}
+    out = []
+    for a in spec.asserts:
+        row = by_id.get(a.id)
+        if row is None:
+            out.append(
+                AssertResult(id=a.id, kind=a.kind, status="not_evaluated", expected=a.describe())
+            )
+        else:
+            out.append(AssertResult.model_validate(row))
+    return out
+
+
 def build_report(
     spec: RunSpec,
     run_dir: Path,
@@ -390,6 +420,7 @@ def build_report(
         if e.get("type") == "policy"
     ]
     finish = next((e for e in reversed(events) if e.get("type") == "finish"), None)
+    asserts = _assert_results(spec, events)
 
     steps_used = sum(1 for s in trace if s.counted)
     if finish is not None:
@@ -474,6 +505,8 @@ def build_report(
             events=policy_events,
         ),
         observations=observations_model,
+        asserts=asserts,
+        asserts_passed=all(a.status == "passed" for a in asserts) if asserts else None,
         metrics=metrics,
         warnings=warnings,
         hooks=hooks,
@@ -533,6 +566,18 @@ def _short_args(step: TraceStep) -> str:
     return text if len(text) <= 90 else text[:87] + "..."
 
 
+def _assert_lines(report: Report) -> list[str]:
+    if not report.asserts:
+        return []
+    verdict = "all passed" if report.asserts_passed else "NOT all passed"
+    lines = ["", f"## Assertions ({verdict})", "", "| id | check | status | observed |"]
+    lines.append("|---|---|---|---|")
+    for a in report.asserts:
+        seen = a.error or json.dumps(a.observed, ensure_ascii=False, default=str)[:80]
+        lines.append(f"| {a.id} | {a.expected} | {a.status} | {seen} |")
+    return lines
+
+
 def render_markdown(report: Report) -> str:
     p, o, r = report.persona, report.outcome, report.run
     lines = [
@@ -556,6 +601,7 @@ def render_markdown(report: Report) -> str:
     if report.metrics.actions_by_tool:
         moves = ", ".join(f"{k} {v}" for k, v in report.metrics.actions_by_tool.items())
         lines += ["", f"Actions: {moves}"]
+    lines += _assert_lines(report)
 
     lines += ["", "## Trace", ""]
     for s in report.trace:

@@ -290,3 +290,149 @@ async def test_a_harness_brain_is_reported_from_the_files_it_left(tmp_path):
     failed = await runner_mod.run_spec(spec, brain=FileWritingHarness(exit_code=1))
     # The files say finish; a non-zero harness exit does not override a finished run.
     assert failed.run.status == "completed" and failed.brain.exit_code == 1
+
+
+# --- assertions, replay ------------------------------------------------------------------
+
+
+def _with_asserts(tmp_path: Path, script: list[dict]) -> RunSpec:
+    return spec_for(
+        tmp_path,
+        script,
+        asserts=[
+            {"id": "on-done", "kind": "url_matches", "value": r"/done$"},
+            {"id": "thanks", "kind": "text_present", "value": "Thank you"},
+            {"id": "no-error", "kind": "text_absent", "value": "Error"},
+            {"id": "one-receipt", "kind": "selector_count", "selector": ".receipt", "min": 1},
+        ],
+    )
+
+
+SCRIPT_TO_DONE = [
+    {"tool": "navigate", "args": {"url": ENTRY}, "expect": "ok"},
+    {"tool": "navigate", "args": {"url": "https://start.example/done"}, "expect": "ok"},
+    {"tool": "finish", "args": {"outcome": "reached_goal", "summary": "Bought it."}},
+]
+
+
+def _page_shows(page: FakePage, text: str, count: int) -> None:
+    from lyra_browser.uat.asserts import _PAGE_STATE_JS
+
+    page.eval_answers[_PAGE_STATE_JS] = {"text": text, "count": count, "error": None}
+
+
+@pytest.mark.asyncio
+async def test_assertions_are_judged_on_the_page_the_persona_finished_on(fake_browser, tmp_path):
+    _page_shows(fake_browser, "Thank you for your order", 1)
+    report = await runner_mod.run_spec(_with_asserts(tmp_path, SCRIPT_TO_DONE))
+    assert {a.id: a.status for a in report.asserts} == {
+        "on-done": "passed",
+        "thanks": "passed",
+        "no-error": "passed",
+        "one-receipt": "passed",
+    }
+    assert report.asserts_passed is True
+    assert report.asserts[0].observed == "https://start.example/done"
+    assert "## Assertions (all passed)" in (Path(report.artifacts.dir) / "report.md").read_text()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_assertion_fails_the_judgement_whatever_the_persona_claimed(
+    fake_browser, tmp_path
+):
+    _page_shows(fake_browser, "Error: card declined", 0)
+    report = await runner_mod.run_spec(_with_asserts(tmp_path, SCRIPT_TO_DONE))
+    assert report.outcome.status == "reached_goal"  # what the model said
+    assert report.asserts_passed is False  # what the page shows
+    statuses = {a.id: a.status for a in report.asserts}
+    assert statuses == {
+        "on-done": "passed",
+        "thanks": "failed",
+        "no-error": "failed",
+        "one-receipt": "failed",
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_run_without_finish_is_judged_when_the_browser_closes(fake_browser, tmp_path):
+    _page_shows(fake_browser, "Thank you", 1)
+    report = await runner_mod.run_spec(_with_asserts(tmp_path, SCRIPT_TO_DONE[:2]))
+    assert report.run.exit_reason == "no_finish"
+    assert report.asserts_passed is True and len(report.asserts) == 4
+
+
+@pytest.mark.asyncio
+async def test_replay_reaches_the_same_judgement_and_says_when_it_does_not(fake_browser, tmp_path):
+    from lyra_browser.uat.export import committed_schema, export_report
+    from lyra_browser.uat.replay import replay_run
+
+    _page_shows(fake_browser, "Thank you", 1)
+    original = await runner_mod.run_spec(_with_asserts(tmp_path, SCRIPT_TO_DONE))
+    fake_browser.url = "about:blank"
+    result = await replay_run(Path(original.artifacts.dir))
+    assert result["same"] is True and result["exact"] is True, result
+    assert result["judgement"]["asserts_passed"] is True
+    replayed = Report.model_validate_json(Path(result["replay"]).read_text(encoding="utf-8"))
+    assert replayed.brain.backend == "scripted"
+    assert [s.tool for s in replayed.trace] == [s.tool for s in original.trace]
+
+    # The site changed: the same actions now end on an error page.
+    _page_shows(fake_browser, "Error", 0)
+    fake_browser.url = "about:blank"
+    changed = await replay_run(Path(original.artifacts.dir), out_dir=tmp_path / "replays")
+    assert changed["same"] is False
+    assert changed["differences"]["asserts_passed"] == {"original": True, "replay": False}
+
+    # An export of either validates against the committed schema.
+    jsonschema = pytest.importorskip("jsonschema")
+    for report in (original, replayed):
+        record = json.loads(export_report(report).model_dump_json())
+        jsonschema.validate(record, committed_schema())
+        assert record["task_id"] == "p1" and record["success"] is True
+
+
+def test_replay_marks_redacted_arguments_as_inexact(tmp_path):
+    from lyra_browser.uat.replay import script_from
+
+    report = Report.model_validate(_minimal_report(tmp_path))
+    script, exact = script_from(report)
+    assert exact is False
+    assert script == [
+        {"tool": "type_text", "args": {"selector": "#pw", "value": "<redacted:8 chars>"}}
+    ]
+
+
+def _minimal_report(tmp_path: Path) -> dict:
+    from datetime import UTC, datetime
+
+    from lyra_browser.uat.report import BrainInfo, Hooks, build_report
+
+    spec = spec_for(tmp_path, [{"tool": "finish", "args": {}}])
+    run_dir = tmp_path / "r"
+    run_dir.mkdir()
+    row = {
+        "n": 1,
+        "ts": "t",
+        "tool": "type_text",
+        "args": {"selector": "#pw", "value": "<redacted:8 chars>"},
+        "status": "ok",
+        "action": True,
+        "counted": True,
+        "system": False,
+        "url_before": ENTRY,
+        "url_after": ENTRY,
+        "result_head": "",
+    }
+    (run_dir / "trace.jsonl").write_text(json.dumps(row) + "\n")
+    now = datetime.now(UTC)
+    report = build_report(
+        spec,
+        run_dir,
+        run_id="r",
+        started_at=now,
+        finished_at=now,
+        brain=BrainInfo(backend="scripted"),
+        hooks=Hooks(),
+        audit_path=run_dir / "audit.jsonl",
+    )
+    return report.model_dump(mode="json")

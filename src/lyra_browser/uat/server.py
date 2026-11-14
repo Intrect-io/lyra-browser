@@ -106,7 +106,7 @@ def read_run_file(path: Path) -> tuple[RunSpec, Path]:
 
 
 def make_recorder(spec: RunSpec, run_dir: Path) -> RunRecorder:
-    return RunRecorder(
+    recorder = RunRecorder(
         run_dir,
         step_budget=spec.persona.step_budget,
         entry_url=spec.persona.entry_url,
@@ -114,6 +114,8 @@ def make_recorder(spec: RunSpec, run_dir: Path) -> RunRecorder:
         auto_screenshot=spec.limits.auto_screenshot,
         prior_finding_ids=[f.id for f in spec.prior_findings],
     )
+    recorder.assertions = list(spec.asserts)
+    return recorder
 
 
 async def build_uat_server(

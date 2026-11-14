@@ -1,0 +1,297 @@
+{
+  "$defs": {
+    "AssertResult": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "passed",
+            "failed",
+            "error",
+            "not_evaluated"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "expected": {
+          "title": "Expected",
+          "type": "string"
+        },
+        "observed": {
+          "default": null,
+          "title": "Observed"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "status",
+        "expected"
+      ],
+      "title": "AssertResult",
+      "type": "object"
+    },
+    "ExportStep": {
+      "additionalProperties": false,
+      "properties": {
+        "n": {
+          "title": "N",
+          "type": "integer"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "args": {
+          "additionalProperties": true,
+          "title": "Args",
+          "type": "object"
+        },
+        "status": {
+          "title": "Status",
+          "type": "string"
+        },
+        "url_after": {
+          "title": "Url After",
+          "type": "string"
+        },
+        "counted": {
+          "title": "Counted",
+          "type": "boolean"
+        },
+        "duration_ms": {
+          "default": 0,
+          "title": "Duration Ms",
+          "type": "integer"
+        },
+        "screenshot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Screenshot"
+        }
+      },
+      "required": [
+        "n",
+        "tool",
+        "args",
+        "status",
+        "url_after",
+        "counted"
+      ],
+      "title": "ExportStep",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "lyra-uat-export",
+      "default": "lyra-uat-export",
+      "title": "Format",
+      "type": "string"
+    },
+    "version": {
+      "const": 1,
+      "default": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "task_id": {
+      "description": "the persona id: what was asked",
+      "title": "Task Id",
+      "type": "string"
+    },
+    "run_id": {
+      "title": "Run Id",
+      "type": "string"
+    },
+    "started_at": {
+      "title": "Started At",
+      "type": "string"
+    },
+    "finished_at": {
+      "title": "Finished At",
+      "type": "string"
+    },
+    "duration_s": {
+      "title": "Duration S",
+      "type": "number"
+    },
+    "run_status": {
+      "enum": [
+        "completed",
+        "incomplete",
+        "error"
+      ],
+      "title": "Run Status",
+      "type": "string"
+    },
+    "exit_reason": {
+      "title": "Exit Reason",
+      "type": "string"
+    },
+    "success": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Success"
+    },
+    "asserts": {
+      "items": {
+        "$ref": "#/$defs/AssertResult"
+      },
+      "title": "Asserts",
+      "type": "array"
+    },
+    "claimed_outcome": {
+      "enum": [
+        "reached_goal",
+        "partial",
+        "blocked",
+        "unknown"
+      ],
+      "title": "Claimed Outcome",
+      "type": "string"
+    },
+    "summary": {
+      "title": "Summary",
+      "type": "string"
+    },
+    "final_url": {
+      "title": "Final Url",
+      "type": "string"
+    },
+    "steps_used": {
+      "title": "Steps Used",
+      "type": "integer"
+    },
+    "step_budget": {
+      "title": "Step Budget",
+      "type": "integer"
+    },
+    "tool_calls": {
+      "title": "Tool Calls",
+      "type": "integer"
+    },
+    "findings": {
+      "title": "Findings",
+      "type": "integer"
+    },
+    "brain_backend": {
+      "title": "Brain Backend",
+      "type": "string"
+    },
+    "brain_model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Brain Model"
+    },
+    "input_tokens": {
+      "title": "Input Tokens",
+      "type": "integer"
+    },
+    "output_tokens": {
+      "title": "Output Tokens",
+      "type": "integer"
+    },
+    "cost_usd": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Cost Usd"
+    },
+    "lyra_browser_version": {
+      "title": "Lyra Browser Version",
+      "type": "string"
+    },
+    "steps": {
+      "items": {
+        "$ref": "#/$defs/ExportStep"
+      },
+      "title": "Steps",
+      "type": "array"
+    },
+    "report_json": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Report Json"
+    }
+  },
+  "required": [
+    "task_id",
+    "run_id",
+    "started_at",
+    "finished_at",
+    "duration_s",
+    "run_status",
+    "exit_reason",
+    "success",
+    "asserts",
+    "claimed_outcome",
+    "summary",
+    "final_url",
+    "steps_used",
+    "step_budget",
+    "tool_calls",
+    "findings",
+    "brain_backend",
+    "brain_model",
+    "input_tokens",
+    "output_tokens",
+    "cost_usd",
+    "lyra_browser_version",
+    "steps",
+    "report_json"
+  ],
+  "title": "ExportV1",
+  "type": "object"
+}

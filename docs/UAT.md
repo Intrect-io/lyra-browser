@@ -200,7 +200,7 @@ uat-runs/<run-id>/
   observations.json           counts, and what the server knows of the browser
   browser/                    the browser's data dir: audit.jsonl and a profile of its own
   harness/                    harness brains: prompts, argv, stdout/stderr, MCP config
-  run.json                    the spec the run was started from
+  run.json                    the spec the run was started from (what replay reads)
 ```
 
 `report.json` (schema version 1; `lyra-uat schema report`):
@@ -223,6 +223,50 @@ uat-runs/<run-id>/
   that never clicked, an invalid profile, observers that failed to attach.
 - `brain` — backend, model, turns, tokens (input, output, cache read/write),
   cost where known, session id. `observations`, `hooks`, `artifacts`.
+- `asserts` / `asserts_passed` — the spec's assertions on the final page and their
+  conjunction (below); `asserts_passed` is `null` when the spec has none.
+
+### Assertions: a judgement the model cannot make up
+
+`finish` is what the persona *says* happened. `asserts` in a run or batch spec say what
+the page must *show*, and the server checks them itself, once: when `finish` is called,
+on the page the persona finished on, or, if it never is, when the runner closes the
+browser. A harness that exits without `finish` leaves them `not_evaluated`, and that
+counts as not passed.
+
+```yaml
+asserts:
+  - {id: on-receipt, kind: url_matches, value: "/orders/\\d+$"}   # regular expression
+  - {id: title, kind: title_contains, value: "Order complete"}
+  - {id: thanks, kind: text_present, value: "Thank you", selector: main}  # selector optional
+  - {id: no-error, kind: text_absent, value: "declined"}
+  - {id: one-receipt, kind: selector_count, selector: ".receipt", min: 1, max: 1}
+```
+
+Text is the visible text (`innerText`) of the page or of what `selector` matches. Each
+row records what was observed, so a failure says what the page showed instead.
+
+### Export and replay
+
+```bash
+lyra-uat export uat-runs/<run-id> [--out run.export.json]   # one flat record
+lyra-uat schema export                                      # its JSON Schema
+lyra-uat replay uat-runs/<run-id> [--out DIR]               # same calls, same judgement?
+```
+
+`export` writes the stable part of a run that a benchmark or dashboard reads: task
+(persona) id, `success` (the assertions' verdict, `null` without any), the outcome the
+persona claimed, final URL, steps, tool calls, findings, tokens, cost and every step.
+The shape is `lyra-uat-export` version 1; its schema is committed as
+`src/lyra_browser/uat/schemas/export.v1.json` and a test keeps it equal to the model, so
+a change of shape is a new version. A benchmark's own result format is a mapping from
+this record, kept with that benchmark's adapter.
+
+`replay` runs the recorded tool calls again, in order, with the `scripted` brain and the
+run's own spec (`run.json`), and compares status, exit reason, outcome, steps used and
+every assertion. It prints the comparison and exits 0 when the judgement is the same, 2
+when it is not. Values the audit redacts (typed passwords) cannot be replayed as typed:
+the result then says `"exact": false`.
 
 `lyra-uat run` exits 0 when the persona called `finish`, 2 when the run did not
 complete (budget, wall clock, a brain or hook failure, an invalid profile), and 130

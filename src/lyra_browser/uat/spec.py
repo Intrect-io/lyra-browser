@@ -225,6 +225,53 @@ class PriorFinding(Strict):
     round: str | None = None
 
 
+AssertKind = Literal[
+    "url_matches", "title_contains", "text_present", "text_absent", "selector_count"
+]
+
+
+class Assertion(Strict):
+    """A check on the page the run ended on, evaluated by the server, never the model.
+
+    ``url_matches``: ``value`` is a regular expression searched in the URL.
+    ``title_contains``: ``value`` is a substring of the title.
+    ``text_present`` / ``text_absent``: ``value`` in the visible text of the page, or of
+    what ``selector`` matches. ``selector_count``: how many elements ``selector`` matches,
+    within ``min``..``max``.
+    """
+
+    id: str = Field(min_length=1)
+    kind: AssertKind
+    value: str = ""
+    selector: str | None = None
+    min: int | None = Field(None, ge=0)
+    max: int | None = Field(None, ge=0)
+
+    @model_validator(mode="after")
+    def _complete(self) -> Assertion:
+        if self.kind == "selector_count":
+            if not self.selector:
+                raise ValueError(f"assertion {self.id!r}: selector_count needs a selector")
+            if self.min is None and self.max is None:
+                raise ValueError(f"assertion {self.id!r}: selector_count needs min or max")
+        elif not self.value:
+            raise ValueError(f"assertion {self.id!r}: {self.kind} needs a value")
+        if self.kind == "url_matches":
+            try:
+                re.compile(self.value)
+            except re.error as exc:
+                raise ValueError(f"assertion {self.id!r}: bad regular expression: {exc}") from None
+        return self
+
+    def describe(self) -> str:
+        where = f" in {self.selector}" if self.selector else ""
+        if self.kind == "selector_count":
+            low = "" if self.min is None else f">= {self.min}"
+            high = "" if self.max is None else f"<= {self.max}"
+            return f"count({self.selector}) {' and '.join(x for x in (low, high) if x)}"
+        return f"{self.kind} {self.value!r}{where}"
+
+
 DEFAULT_TOOLS: tuple[str, ...] = (
     "navigate",
     "go_back",
@@ -263,6 +310,8 @@ class RunSpec(Strict):
     hooks: Hooks = Field(default_factory=Hooks)
     limits: Limits = Field(default_factory=Limits)
     tools: ToolPolicy = Field(default_factory=ToolPolicy)
+    # Checks on the page the run ends on (see ``Assertion``); the report's judgement.
+    asserts: list[Assertion] = Field(default_factory=list)
     # Where run directories are created: ``<out_dir>/<run_id>/``.
     out_dir: Path = Path("uat-runs")
     # The browser profile. None: a fresh one inside the run directory. Set: an
@@ -332,6 +381,7 @@ class BatchSpec(Strict):
     hooks: Hooks = Field(default_factory=Hooks)
     limits: Limits = Field(default_factory=Limits)
     tools: ToolPolicy = Field(default_factory=ToolPolicy)
+    asserts: list[Assertion] = Field(default_factory=list)
     out_dir: Path = Path("uat-runs")
     # Persona id -> browser profile (``LYRA_BROWSER_DATA_DIR`` layout) that already holds
     # its login. Required for ``preseeded`` personas; others get a fresh profile.

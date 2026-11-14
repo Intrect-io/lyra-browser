@@ -176,6 +176,9 @@ class RunRecorder:
         self.finding_count = 0
         self.verdicts: dict[str, str] = {}
         self.finished = False
+        # The spec's assertions (set by the server builder) and whether they were checked.
+        self.assertions: list[Any] = []
+        self.asserts_done = False
         self.last_url = ""
         self._entry_done = False
         self._system_depth = 0
@@ -368,6 +371,9 @@ class RunRecorder:
 
     def add_note(self, text: str) -> None:
         self._event("note", text=text)
+
+    def add_asserts(self, results: list[dict[str, Any]]) -> None:
+        self._event("asserts", results=results)
 
     def set_finish(
         self,
