@@ -198,3 +198,116 @@ def test_the_cli_cancels_on_sigint_and_sigterm_even_if_sigint_was_inherited_as_i
         if proc.poll() is None:
             proc.kill()
     assert proc.returncode == 130 and "cancelled" in out
+
+
+# The parent a sweeper protects: it starts a stubborn harness group through ``spawn`` and a
+# "browser" in a session of its own (as Playwright's driver launches Chrome) whose
+# ``--user-data-dir`` points into a watched directory, reports every pid, and waits to be
+# killed with SIGKILL, which it cannot handle.
+KILLED_PARENT = textwrap.dedent(
+    """
+    import asyncio, os, subprocess, sys
+    from pathlib import Path
+    from lyra_browser.uat import procs
+
+    stub, pids_out, profile = sys.argv[1], Path(sys.argv[2]), Path(sys.argv[3])
+    group_pids = Path(str(pids_out) + ".group")
+
+    async def main():
+        procs.sweeper.watch_dir(profile)
+        await procs.spawn([sys.executable, stub, str(group_pids)],
+                          stdout=asyncio.subprocess.DEVNULL)
+        browser = subprocess.Popen(
+            [sys.executable, "-c", "import time; time.sleep(300)",
+             f"--user-data-dir={profile / 'profile'}"],
+            start_new_session=True)
+        while not group_pids.exists() or group_pids.read_text().count(" ") != 1:
+            await asyncio.sleep(0.05)
+        pids_out.write_text(f"{group_pids.read_text()} {browser.pid} {procs.sweeper.pid}")
+        await asyncio.sleep(300)
+
+    asyncio.run(main())
+    """
+)
+
+
+@needs_proc
+@pytest.mark.asyncio
+async def test_a_sigkilled_parent_leaves_no_orphans(stub, tmp_path):
+    """SIGKILL cannot be handled: the sweeper stops the parent's groups and its browsers."""
+    import signal
+    import subprocess
+
+    argv, _ = stub(STUBBORN)
+    parent_script = tmp_path / "parent.py"
+    parent_script.write_text(KILLED_PARENT)
+    pids_file, profile = tmp_path / "all-pids", tmp_path / "run-profile"
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+    parent = subprocess.Popen(
+        [sys.executable, str(parent_script), argv[1], str(pids_file), str(profile)], env=env
+    )
+    try:
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            if pids_file.exists() and len(pids_file.read_text().split()) == 4:
+                break
+            await asyncio.sleep(0.05)
+        harness_pid, server_pid, browser_pid, sweeper_pid = map(int, pids_file.read_text().split())
+        assert all(running(p) for p in (harness_pid, server_pid, browser_pid, sweeper_pid))
+        parent.send_signal(signal.SIGKILL)
+        parent.wait(timeout=5)
+        survivors = await wait_dead([harness_pid, server_pid, browser_pid, sweeper_pid], 10.0)
+        assert survivors == [], f"left running: {survivors}"
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+
+
+@needs_proc
+def test_a_clean_exit_tells_the_sweeper_to_leave_everything_alone(tmp_path):
+    import subprocess
+
+    victim = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)", f"--user-data-dir={tmp_path}/p"],
+        start_new_session=True,
+    )
+    try:
+        sweeper = procs.Sweeper()
+        sweeper.watch_dir(tmp_path)
+        sweeper.watch_group(victim.pid)
+        proc = sweeper._proc
+        sweeper.close()
+        assert proc.returncode == 0
+        time.sleep(0.3)
+        assert running(victim.pid)
+    finally:
+        victim.kill()
+        victim.wait()
+
+
+@needs_proc
+def test_the_sweeper_matches_only_flags_that_point_into_a_watched_dir(tmp_path):
+    """Not by name and not by prefix of a sibling: ``<dir>-other`` is someone else's."""
+    import subprocess
+
+    watched = tmp_path / "run"
+    sleep = [sys.executable, "-c", "import time; time.sleep(30)"]
+    flag = f"--user-data-dir={watched}/profile"
+    inside = subprocess.Popen([*sleep, flag], start_new_session=True)
+    sibling = subprocess.Popen([*sleep, f"--user-data-dir={watched}-other"], start_new_session=True)
+    positional = subprocess.Popen([*sleep, str(watched / "profile")], start_new_session=True)
+    try:
+        sweeper = procs.Sweeper()
+        sweeper.watch_dir(watched)
+        proc = sweeper._proc
+        proc.stdin.close()  # what a dead parent looks like from the sweeper's side
+        proc.wait(timeout=10)
+        deadline = time.monotonic() + 5
+        while running(inside.pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not running(inside.pid)
+        assert running(sibling.pid) and running(positional.pid)
+    finally:
+        for p in (inside, sibling, positional):
+            p.kill()
+            p.wait()

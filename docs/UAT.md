@@ -247,11 +247,19 @@ killed if it will not. What a harness leaves running after a normal exit is stop
 - **A harness group killed hard** (measured with Claude Code and Codex): the browser exits
   on its own within seconds, because its debugging pipe closes with the server, and the
   runner reports `harness_exit`.
-- **`lyra-uat run` itself killed with SIGKILL** cannot be handled, and nothing below it is
-  stopped: the harness carries on with its persona, with its browser, until it finishes
-  or reaches `brain.max_turns` / `brain.max_budget_usd`, then exits and takes the browser
-  with it. Keep those two limits set. Stop such a run with SIGINT to the harness's process
-  group.
+- **`lyra-uat run` or `lyra-uat batch` itself killed with SIGKILL** cannot be handled by
+  the process itself, so a small *sweeper* does it: a process of its own session that
+  holds a pipe from `lyra-uat` and learns, as the run goes, every child group it started
+  and the browser profile directories in use. When the pipe closes without a goodbye
+  it terminates, then kills, those groups and every process with a `--flag=<path>`
+  argument pointing into one of those directories (Chrome's `--user-data-dir`, its crash
+  handler's `--database`). It never matches by program name, so a Chrome of the
+  operator's own is never a candidate; a clean exit tells it to leave. Measured with
+  `scripts/verify_uat_procs_e2e.py` (2026-11-15, Linux, headless, 3 runs per driver): a
+  SIGKILLed process with an open browser left **0** processes on its profile within 10 s
+  with the sweeper on the native and the Playwright driver; without it the native
+  driver's browser stayed (10 of 11 processes still running after 10 s), Playwright's
+  exited on its own when its driver's pipe closed.
 
 This is POSIX code (process groups, signals). It was run on Linux only: where there is no
 `/proc` (macOS) it falls back to `killpg` alone for the liveness check, which has not been
@@ -290,6 +298,15 @@ after another (personas sharing an account). `concurrency` caps the children at
 once. The key under `personas` must equal the `id` inside that persona's file;
 `preseeded` personas need an entry in `data_dirs`, and two personas of a parallel
 group may not share one.
+
+Four settings make a long or parallel batch safer to leave alone:
+
+| key | default | what it does |
+|---|---|---|
+| `disposable_profiles` | `false` | every attempt runs on a profile of its own under `<batch>/profiles/`, deleted when it ends: a copy of the persona's `data_dirs` entry without Chrome's lock files (the original is never written to), or an empty one. Nothing one run leaves in a profile reaches the next |
+| `retries` | `0` (max 5) | a persona whose child crashed (no report) or ended on `browser_error`, `brain_error` or `harness_exit` is run again, up to this many more times. What the persona met on the site (budget, wall clock, no `finish`) is a result and is not retried. Each attempt has its own spec and log files (`<id>-attempt2.json`), `attempts` in the summary counts them, and the warnings say why an earlier one failed |
+| `retry_delay_s` | `5` | pause before a retry |
+| `start_interval_s` | `0` | at least this many seconds between two child starts anywhere in the batch, retries included, so a parallel group does not open every session on the target in the same second |
 
 `summary.json` and `summary.md` list each persona's outcome, run status, steps,
 finding counts, verdict counts and cost, and lay the earlier findings out as a

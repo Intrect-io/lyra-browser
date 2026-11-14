@@ -17,6 +17,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from . import procs
 from .brains import BrainError, BrainSession, HarnessBrain, LoopBrain, ToolSpec, make_brain
 from .prompt import build_system_prompt, build_task_prompt
 from .report import BrainInfo, ExitReason, HookResult, Hooks, Report, build_report, write_report
@@ -159,11 +160,27 @@ async def run_spec(spec: RunSpec, *, brain: LoopBrain | HarnessBrain | None = No
     only for a run directory that cannot be created or a spec that names no brain.
 
     Interrupted (Ctrl-C, a batch stopping its child) it still writes the report of what
-    happened so far, marked ``interrupted``, and then lets the cancellation through."""
+    happened so far, marked ``interrupted``, and then lets the cancellation through.
+    Killed outright (SIGKILL), the sweeper stops the browser on the run's profile."""
     started = datetime.now(UTC)
     run_id = new_run_id(spec.persona.id, started)
     run_dir = (spec.out_dir / run_id).resolve()
     run_dir.mkdir(parents=True, exist_ok=False)
+    profile = build_config(spec, run_dir).data_dir
+    procs.sweeper.watch_dir(profile)
+    try:
+        return await _run_spec(spec, brain, started, run_id, run_dir)
+    finally:
+        procs.sweeper.unwatch_dir(profile)
+
+
+async def _run_spec(
+    spec: RunSpec,
+    brain: LoopBrain | HarnessBrain | None,
+    started: datetime,
+    run_id: str,
+    run_dir: Path,
+) -> Report:
     run_file = write_run_file(spec, run_dir)
     brain = brain or make_brain(spec.brain)
     hooks = Hooks()

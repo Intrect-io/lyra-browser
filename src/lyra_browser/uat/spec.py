@@ -340,6 +340,19 @@ class BatchSpec(Strict):
     guard_backend: Literal["route", "cdp"] = "route"
     driver: Literal["auto", "playwright", "patchright"] = "auto"
     report_language: str = "English"
+    # Each attempt gets a profile of its own that is deleted when it ends: a copy of its
+    # ``data_dirs`` entry (the original is never written to) or an empty one. What one
+    # persona's run left in a profile (cookies, storage, a half-finished login) cannot
+    # reach the next attempt or another persona.
+    disposable_profiles: bool = False
+    # A persona whose child crashed (no report) or ended on a browser, brain or harness
+    # error is run again, up to this many more times, ``retry_delay_s`` apart. What the
+    # persona met on the site (a budget, the wall clock, no finish) is a result, not retried.
+    retries: int = Field(0, ge=0, le=5)
+    retry_delay_s: float = Field(5.0, ge=0, le=600)
+    # At least this many seconds between two child starts anywhere in the batch, retries
+    # included: a parallel group does not open N sessions on the target in the same second.
+    start_interval_s: float = Field(0.0, ge=0, le=3600)
 
     @field_validator("out_dir", mode="before")
     @classmethod
