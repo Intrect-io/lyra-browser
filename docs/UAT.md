@@ -207,7 +207,8 @@ uat-runs/<run-id>/
 
 - `run` — `status` (`completed`, `incomplete`, `error`), `exit_reason` (`finish`,
   `budget_exhausted`, `wall_timeout`, `brain_error`, `browser_error`,
-  `harness_exit`, `hook_failed`, `no_finish`, `interrupted`), timing.
+  `harness_exit`, `hook_failed`, `no_finish`, `interrupted`, `challenge_abandoned`),
+  timing.
 - `outcome` — what `finish` said (`reached_goal`, `partial`, `blocked`) or
   `unknown` when it never did; steps used against the budget; call count.
 - `findings` — severity (`blocker`, `major`, `minor`), URL, step, expected,
@@ -256,6 +257,47 @@ killed if it will not. What a harness leaves running after a normal exit is stop
 This is POSIX code (process groups, signals). It was run on Linux only: where there is no
 `/proc` (macOS) it falls back to `killpg` alone for the liveness check, which has not been
 run, and Windows is not supported.
+
+## Logins, one-time codes and bot checks
+
+A persona that has to sign in gets the login **by name**. The spec says where each secret
+lives, never the secret:
+
+```yaml
+credentials:
+  shop:
+    origin: https://app.example.com      # the one site it may be typed into
+    username: tester@example.com         # or username_env
+    password_env: SHOP_TEST_PASSWORD     # or password_file
+    totp_file: ~/.config/shop-totp-seed  # or totp_env: a base32 seed, as sites show it
+```
+
+With `credentials` set the persona is offered `fill_credential(name, field, selector,
+submit=false)`, where `field` is `username`, `password` or `totp` (the code of this
+moment, RFC 6238, computed when it is typed). The server types the value through
+`type_text`, so the same consent, enforcement and audit redaction apply, and only on the
+credential's own `origin`: anywhere else the answer is `wrong_origin` and nothing is
+typed. A secret that cannot be read is `credential_unavailable`, naming the variable or
+file. The value is in no argument, result, trace row or report: the persona, the run
+file and the report hold the name and the field.
+
+Every password and TOTP seed of the spec is also held by a scrubber: a page that echoes
+it, a result that quotes it, or a POST body `network_capture` keeps is written (and shown
+to the model) with `<secret>` in its place, in its plain, URL-encoded and JSON forms.
+Usernames and the six-digit codes are not scrubbed. Screenshots are pixels: a password
+field shows dots, a code field shows the code of that moment.
+
+Bot checks are named as in [the README](../README.md#bot-checks-challenge). In a run the
+third meeting with the same check (`challenge_abandoned`) ends the persona's browsing:
+every later browser tool is refused, the policy event `challenge_abandoned` is recorded,
+and without a `finish` the report ends `incomplete` with exit reason
+`challenge_abandoned`. `target.captcha_solver` (`module:function`) installs a solver for
+the run's server; none is shipped.
+
+`scripts/verify_unattended_e2e.py` is the gate: on the demo site (`/login` -> `/2fa` ->
+`/account`, fresh canary password and seed per run) a scripted persona signs in with
+`fill_credential` in a real headless Chrome, meets `/gate` three times, and every file
+of both runs is searched for the password and the seed.
 
 ## Hooks
 

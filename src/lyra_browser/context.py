@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from .approval import CollaborationState
 from .audit import AuditLog
+from .challenge import ChallengeLedger
 from .config import Config
 from .consent import ConsentBroker
 from .devtools import DevtoolsRecorder
@@ -42,6 +43,8 @@ class ServerContext:
     """Judges every file a tab is offered, and saves the ones asked for. See downloads.py."""
     devtools: DevtoolsRecorder | None = None
     """The console and network log every tab feeds. See devtools.py."""
+    challenges: ChallengeLedger | None = None
+    """How often each bot check has stopped the agent. See challenge.py."""
 
     def __post_init__(self) -> None:
         if self.perms is None:
@@ -52,6 +55,8 @@ class ServerContext:
             self.guard = NavigationGuard(self.config, self.perms, self.audit, collab=self.collab)
         if self.claim_lock is None:
             self.claim_lock = asyncio.Lock()
+        if self.challenges is None:
+            self.challenges = ChallengeLedger()
         if self.downloads is None:
             self.downloads = Downloads(
                 self.config,

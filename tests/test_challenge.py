@@ -7,6 +7,8 @@ status and a hint, and that an ordinary page reaches it untouched.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from lyra_browser import challenge as ch
@@ -212,3 +214,151 @@ async def test_read_page_of_an_ordinary_page_has_no_challenge_key(make_ctx, tool
 
     assert "challenge" not in result
     assert "hint" not in result
+
+
+# --------------------------------------------------------------------------
+# navigate: the challenge branch, the same check again and again, the solver hook
+# --------------------------------------------------------------------------
+
+
+def _always(found):
+    async def observe(page, http_status=None):
+        return found
+
+    return observe
+
+
+async def test_navigate_names_the_check_and_counts_it(make_ctx, tools_of, page, monkeypatch):
+    from lyra_browser.tools import navigation
+
+    monkeypatch.setattr(
+        navigation, "observe", _always(ch.Challenge("cloudflare", INTERACTIVE, "title"))
+    )
+    ctx = make_ctx(headless=True)
+    navigate = (await tools_of(ctx))["navigate"]
+
+    first = await navigate(url=page.url)
+
+    assert first["status"] == "challenge" and first["challenge"]["vendor"] == "cloudflare"
+    assert first["attempts"] == 1 and first["max_attempts"] == 3
+    assert "nobody is at this window" in first["hint"]
+    rows = [json.loads(line) for line in ctx.config.audit_path.read_text().splitlines()]
+    assert any(r["tool"] == "challenge_seen" for r in rows)
+
+
+async def test_the_same_check_three_times_is_abandoned(make_ctx, tools_of, page, monkeypatch):
+    from lyra_browser.tools import navigation
+
+    monkeypatch.setattr(
+        navigation, "observe", _always(ch.Challenge("datadome", INTERACTIVE, "frame"))
+    )
+    navigate = (await tools_of(make_ctx(headless=True)))["navigate"]
+
+    results = [await navigate(url=page.url) for _ in range(3)]
+
+    assert [r["status"] for r in results] == ["challenge", "challenge", "challenge_abandoned"]
+    assert [r["attempts"] for r in results] == [1, 2, 3]
+    assert "Do not try again" in results[-1]["hint"]
+
+
+async def test_the_limit_is_configurable_and_counts_per_vendor(
+    make_ctx, tools_of, page, monkeypatch
+):
+    from lyra_browser.tools import navigation
+
+    found = {"c": ch.Challenge("cloudflare", INTERACTIVE, "t")}
+
+    async def observe(page, http_status=None):
+        return found["c"]
+
+    monkeypatch.setattr(navigation, "observe", observe)
+    ctx = make_ctx(headless=True)
+    ctx.config.challenge_max_attempts = 2
+    navigate = (await tools_of(ctx))["navigate"]
+
+    assert (await navigate(url=page.url))["status"] == "challenge"
+    found["c"] = ch.Challenge("hcaptcha", INTERACTIVE, "frame")
+    assert (await navigate(url=page.url))["status"] == "challenge"  # another check
+    assert (await navigate(url=page.url))["status"] == "challenge_abandoned"
+
+
+async def test_a_solver_that_clears_the_check_lets_the_page_through(
+    make_ctx, tools_of, page, monkeypatch
+):
+    from lyra_browser.tools import navigation
+
+    state = {"solved": False, "calls": []}
+
+    async def observe(page, http_status=None):
+        return None if state["solved"] else ch.Challenge("recaptcha", INTERACTIVE, "frame")
+
+    async def solver(info, page):
+        state["calls"].append(info)
+        state["solved"] = True
+        return "solved by the test double"
+
+    monkeypatch.setattr(navigation, "observe", observe)
+    monkeypatch.setattr(navigation, "load_solver", lambda spec: solver)
+    ctx = make_ctx(headless=True)
+    ctx.config.captcha_solver = "tests.double:solve"
+    navigate = (await tools_of(ctx))["navigate"]
+
+    result = await navigate(url=page.url)
+
+    assert result["status"] == "ok" and result["challenge_solved"] == "recaptcha"
+    assert result["solver"] == "solved by the test double"
+    assert state["calls"][0]["vendor"] == "recaptcha" and state["calls"][0]["attempt"] == 1
+    assert ctx.challenges.seen == {}, "a cleared check starts its count again"
+
+
+async def test_a_solver_that_fails_leaves_the_challenge_envelope(
+    make_ctx, tools_of, page, monkeypatch
+):
+    from lyra_browser.tools import navigation
+
+    def solver(info, page):
+        raise RuntimeError("no balance")
+
+    monkeypatch.setattr(
+        navigation, "observe", _always(ch.Challenge("recaptcha", INTERACTIVE, "frame"))
+    )
+    monkeypatch.setattr(navigation, "load_solver", lambda spec: solver)
+    ctx = make_ctx(headless=True)
+    ctx.config.captcha_solver = "tests.double:solve"
+    navigate = (await tools_of(ctx))["navigate"]
+
+    result = await navigate(url=page.url)
+
+    assert result["status"] == "challenge"
+    assert result["solver"].startswith("error: RuntimeError: no balance")
+
+
+async def test_no_solver_is_called_when_someone_is_watching_or_the_page_is_blocked(
+    make_ctx, tools_of, page, monkeypatch
+):
+    from lyra_browser.tools import navigation
+
+    called = []
+    monkeypatch.setattr(navigation, "load_solver", lambda spec: lambda i, p: called.append(i))
+    monkeypatch.setattr(
+        navigation, "observe", _always(ch.Challenge("recaptcha", INTERACTIVE, "frame"))
+    )
+    attended = make_ctx(headless=False)
+    attended.config.captcha_solver = "tests.double:solve"
+    assert (await (await tools_of(attended))["navigate"](url=page.url))["status"] == "challenge"
+
+    monkeypatch.setattr(
+        navigation, "observe", _always(ch.Challenge("unidentified", BLOCKED, "text"))
+    )
+    blocked = make_ctx(headless=True)
+    blocked.config.captcha_solver = "tests.double:solve"
+    assert (await (await tools_of(blocked))["navigate"](url=page.url))["status"] == "challenge"
+    assert called == []
+
+
+def test_load_solver_wants_module_colon_function():
+    import pytest
+
+    with pytest.raises(ValueError):
+        ch.load_solver("no_colon_here")
+    assert ch.load_solver("json:dumps")({"a": 1}) == '{"a": 1}'

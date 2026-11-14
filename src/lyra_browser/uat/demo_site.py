@@ -6,8 +6,10 @@ for a card number (something the persona must refuse), a link that leaves the
 site (something the server must refuse), an analytics-style hit, a console
 error and a page error — and a verification page whose code exists only as
 pixels on a canvas, so a run can prove whether a screenshot really reached its
-model. ``lyra-uat demo-site`` serves it; the real-browser gate
-(``scripts/verify_uat_e2e.py``) runs against it too.
+model. ``/login`` → ``/2fa`` → ``/account`` is a sign-in with a password and a
+one-time code (RFC 6238), for the unattended-login gate
+(``scripts/verify_unattended_e2e.py``). ``lyra-uat demo-site`` serves it; the
+real-browser gate (``scripts/verify_uat_e2e.py``) runs against it too.
 """
 
 from __future__ import annotations
@@ -16,7 +18,9 @@ import secrets
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
+
+from ..totp import verify as verify_totp
 
 HOME = """<!doctype html><title>Demo home</title>
 <h1>Tune — clean up your tracks</h1>
@@ -75,8 +79,35 @@ c.fillText('__CODE__', 40, 56);
 </script>"""
 
 
+LOGIN = """<!doctype html><title>Sign in</title>
+<h1>Sign in</h1>
+<form method="post" action="/login">
+<label>Email <input id="user" name="user" autocomplete="username"></label>
+<label>Password <input id="pass" name="pass" type="password"
+  autocomplete="current-password"></label>
+<button id="signin" type="submit">Sign in</button>
+</form>__ERROR__"""
+
+TWO_FA = """<!doctype html><title>Two-step verification</title>
+<h1>Enter the code from your authenticator app</h1>
+<form method="post" action="/2fa">
+<label>Code <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code">
+</label>
+<button id="verify" type="submit">Verify</button>
+</form>__ERROR__"""
+
+ACCOUNT = """<!doctype html><title>Your account</title>
+<h1>Your account</h1><p id="who">Signed in as __USER__</p>"""
+
+
 class Handler(BaseHTTPRequestHandler):
     alt_base = ""
+    # The demo account. The gate sets these; ``lyra-uat demo-site`` prints them.
+    user = "demo@example.com"
+    password = ""
+    totp_seed = ""
+    # Sign-in state per cookie value: "password" after the first step, "in" after 2FA.
+    sessions: dict[str, str] = {}
     # Drawn on the canvas of /verify and nowhere in the page's text or markup that a
     # tool reads: only a model that was shown the screenshot can repeat it.
     visual_code = "000000"
@@ -105,12 +136,62 @@ class Handler(BaseHTTPRequestHandler):
             self._send("", 204, "text/plain")
         elif path == "/checkout":
             self._send("<title>checkout</title><h1>Checkout</h1>")
+        elif path == "/login":
+            self._send(LOGIN.replace("__ERROR__", ""))
+        elif path == "/2fa":
+            if self._stage() != "password":
+                self._redirect("/login")
+            else:
+                self._send(TWO_FA.replace("__ERROR__", ""))
+        elif path == "/account":
+            if self._stage() != "in":
+                self._redirect("/login")
+            else:
+                self._send(ACCOUNT.replace("__USER__", self.user))
         else:
             self.send_error(404)
 
+    def _sid(self) -> str:
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            key, _, value = part.strip().partition("=")
+            if key == "sid":
+                return value
+        return ""
+
+    def _stage(self) -> str:
+        return self.sessions.get(self._sid(), "")
+
+    def _redirect(self, where: str, cookie: str | None = None) -> None:
+        self.send_response(303)
+        self.send_header("Location", where)
+        if cookie:
+            self.send_header("Set-Cookie", f"sid={cookie}; Path=/; HttpOnly; SameSite=Lax")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _sign_in(self, path: str, form: dict[str, list[str]]) -> None:
+        def field(name: str) -> str:
+            return (form.get(name) or [""])[0]
+
+        if path == "/login":
+            if self.password and field("user") == self.user and field("pass") == self.password:
+                sid = secrets.token_hex(8)
+                self.sessions[sid] = "password"
+                self._redirect("/2fa", cookie=sid)
+            else:
+                self._send(LOGIN.replace("__ERROR__", '<p id="error">Wrong email or password.</p>'))
+        elif self._stage() == "password" and verify_totp(self.totp_seed, field("code")):
+            self.sessions[self._sid()] = "in"
+            self._redirect("/account")
+        else:
+            self._send(TWO_FA.replace("__ERROR__", '<p id="error">That code did not work.</p>'))
+
     def do_POST(self) -> None:  # noqa: N802
-        self.rfile.read(int(self.headers.get("Content-Length") or 0))
-        if urlparse(self.path).path == "/collect":
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        path = urlparse(self.path).path
+        if path in ("/login", "/2fa"):
+            self._sign_in(path, parse_qs(body.decode("utf-8", "replace")))
+        elif path == "/collect":
             self._send("", 204, "text/plain")
         else:
             self._send("<title>submitted</title><h1>Thanks, we got it.</h1>")

@@ -40,7 +40,11 @@ class PageObservers:
     """Listeners for every tab of a run. ``attach`` goes on
     ``BrowserSession.page_observers``; the session calls it for each tab it adopts."""
 
-    def __init__(self, run_dir: Path, *, capture_patterns: Iterable[str] = ()) -> None:
+    def __init__(
+        self, run_dir: Path, *, capture_patterns: Iterable[str] = (), scrub: Any = None
+    ) -> None:
+        # Known secrets (a password a captured POST carries) are replaced before writing.
+        self._scrub = scrub
         self.network_path = run_dir / "network.jsonl"
         self.console_path = run_dir / "console.jsonl"
         self._patterns = [re.compile(p) for p in capture_patterns]
@@ -172,7 +176,8 @@ class PageObservers:
         pending, self._pending = self._pending, []
         by_path: dict[Path, list[str]] = {}
         for path, row in pending:
-            by_path.setdefault(path, []).append(json.dumps(row, ensure_ascii=False, default=str))
+            line = json.dumps(row, ensure_ascii=False, default=str)
+            by_path.setdefault(path, []).append(self._scrub.text(line) if self._scrub else line)
         for path, lines in by_path.items():
             path.parent.mkdir(parents=True, exist_ok=True)
             with path.open("a", encoding="utf-8") as fh:

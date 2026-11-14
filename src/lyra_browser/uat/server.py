@@ -31,6 +31,7 @@ from ..session import BrowserSession
 from ..tools import register_all
 from ..tools import uat as uat_tools
 from ..vision import VisionMiddleware
+from .credentials import CredentialStore
 from .observe import PageObservers
 from .recorder import RunRecorder, UatMiddleware
 from .spec import UAT_TOOLS, RunSpec
@@ -81,6 +82,7 @@ def build_config(spec: RunSpec, run_dir: Path) -> Config:
         driver=spec.driver,
         # Every capture is evidence; nothing is pruned during a run.
         capture_keep=0,
+        captcha_solver=spec.target.captcha_solver,
     )
     cfg.capture_dir = run_dir / "captures"
     return cfg
@@ -138,7 +140,12 @@ async def build_uat_server(
     )
     # Requests, console and page errors of every tab, for the report. The real
     # session calls each observer per adopted tab; a test double has no such list.
-    observers = PageObservers(run_dir, capture_patterns=spec.target.network_capture)
+    store = CredentialStore(spec.credentials)
+    for secret in store.secrets():
+        recorder.scrub.add(secret)
+    observers = PageObservers(
+        run_dir, capture_patterns=spec.target.network_capture, scrub=recorder.scrub
+    )
     page_observers = getattr(ctx.session, "page_observers", None)
     if isinstance(page_observers, list):
         page_observers.append(observers.attach)
@@ -147,6 +154,9 @@ async def build_uat_server(
     mcp = FastMCP("lyra-browser", instructions=instructions_for(cfg) + _UAT_INSTRUCTIONS)
     register_all(mcp, ctx)
     uat_tools.register(mcp, ctx, recorder)
+    typer: dict[str, Any] = {}
+    if spec.credentials:
+        uat_tools.register_credentials(mcp, ctx, store, typer)
 
     offered = set(spec.offered_tools()) | set(UAT_TOOLS)
     tools = await mcp.list_tools()
@@ -156,6 +166,9 @@ async def build_uat_server(
         raise ValueError(f"tools.allow names tools this server does not have: {missing}")
     mcp.disable(keys=[tool.key for tool in tools if tool.name not in offered])
 
+    # fill_credential types through type_text's own body (gates, audit redaction), not
+    # through the middleware: the persona's call is the step, the typing is not another.
+    typer["type_text"] = by_name["type_text"].fn
     # The capture for the trace, bypassing the middleware so it is not a step.
     shoot = by_name["screenshot"].fn
 

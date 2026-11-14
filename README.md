@@ -301,10 +301,24 @@ to get past. It is a page a person has to answer. lyra names the check and stops
   says not to wait and not to look for another way past, to report the task as blocked
   (`finish` with `outcome=blocked`) and carry on with what remains.
 
-Nothing solves, waits out or retries a check. Detection reads the frame hosts, the page
-title and the first 3000 characters of visible text; an article that quotes a check's
-wording further down is not named. A detection in `navigate` is audited as
-`challenge_seen`; `read_page` only reports it in its reply.
+lyra itself solves, waits out or retries no check. Detection reads the frame hosts, the
+page title and the first 3000 characters of visible text; an article that quotes a
+check's wording further down is not named. A detection in `navigate` is audited as
+`challenge_seen` (with the attempt number); `read_page` only reports it in its reply.
+
+- **The same wall again.** `navigate` counts each check by vendor and site. The reply
+  carries `attempts` and `max_attempts`; when the same check stops the agent for the
+  `LYRA_BROWSER_CHALLENGE_MAX_ATTEMPTS`th time (default 3) the status is
+  `challenge_abandoned` and the hint says to stop and report it as blocked. Coming back
+  to the same check is not progress, and a site that sees it is right to harden against
+  the account.
+- **An operator's solver.** `LYRA_BROWSER_CAPTCHA_SOLVER=package.module:function` names
+  a callable lyra hands an `interactive` check to when nobody is watching (never a
+  `blocked` one, never with a person at the window). It is called as
+  `solver(info, page)` with `info = {vendor, kind, evidence, url, attempt}`, may be
+  async, and whatever it does is its own responsibility; lyra ships none. Its answer is
+  reported (`solver`), never trusted: the page is checked again, and only a page that is
+  no longer a check answers `ok` with `challenge_solved`. Audited as `challenge_solver`.
 
 ### Hover and scroll
 
@@ -1020,6 +1034,8 @@ throwaway keyring.
 | `LYRA_BROWSER_TRUSTED_SEND_ORIGINS` | — | Sites where *sending* is also pre-approved — `SUBMIT` and `UPLOAD` — for acceptance runs against your own product. Same entry forms, **separate list**: a site in `TRUSTED_ORIGINS` is not send-trusted by being there. Never `PUBLISH` or `DOWNLOAD`; each approval stays single-use, and it steps aside during a takeover. Audited as `consent_channel=trusted_send`. |
 | `LYRA_BROWSER_FOLLOW_BYPASS` | on | Claude Code client only: while Claude Code runs in bypassPermissions mode, consent requests are answered without a dialog (`consent_channel=bypass`). The mode arrives from the plugin's PreToolUse hook, never from the model; see docs/CLAUDE_CODE_PLUGIN.md (Bypass mode). |
 | `LYRA_BROWSER_DENIED_ORIGINS` | — | Sites refused whatever else says yes: the trusted lists, a live grant and the `autonomous` channel all step aside. Same entry forms. |
+| `LYRA_BROWSER_CHALLENGE_MAX_ATTEMPTS` | `3` | How many times the same bot check (vendor at a site) may stop `navigate` before it answers `challenge_abandoned`. |
+| `LYRA_BROWSER_CAPTCHA_SOLVER` | — | `module:function` of a solver an interactive bot check is handed to when nobody is watching. None is shipped; see [Bot checks](#bot-checks-challenge). |
 | `LYRA_BROWSER_CONSENT_TIMEOUT` | `300` | Seconds a prompt waits for an answer before it counts as a denial (`timed out waiting for the user`). The tool call is held that long, so for an unattended Hermes gateway set it lower — e.g. `60`. |
 | `LYRA_BROWSER_RELEASE_GRACE` | `2` | Seconds before a finished action's unused single-use scope is reclaimed. |
 | `LYRA_BROWSER_OWNER_IDLE_TIMEOUT` | `900` | Seconds a session may hold the browser without using it. Handing it on closes the window. |

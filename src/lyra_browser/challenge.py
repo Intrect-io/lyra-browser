@@ -8,12 +8,27 @@ signed-in profile, then stop and ask the person.
 
 ``classify`` is the judgement and takes plain values, so it is tested without a
 browser. ``observe`` collects those values from a page. Nothing here solves, waits out
-or retries a challenge.
+or retries a challenge by itself.
+
+Two things sit around that judgement:
+
+- ``ChallengeLedger`` counts how often the same check (vendor, at an origin) has stopped
+  the agent. Past ``Config.challenge_max_attempts`` the answer is ``challenge_abandoned``:
+  coming back to the same wall is not progress, and a site that sees it is right to
+  harden its stance against the account.
+- A *solver hook* (``Config.captcha_solver``, ``"module:function"``) the operator may
+  install. lyra ships none. When one is configured and nobody is attending, an
+  interactive check is handed to it once per attempt; whatever it does is its own
+  responsibility (a human-in-the-loop service, a test double), and the page is observed
+  again afterwards to see whether the check is gone.
 """
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+import importlib
+import inspect
+from collections.abc import Awaitable, Callable
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 INTERACTIVE = "interactive"
@@ -121,6 +136,57 @@ async def observe(page: Any, http_status: int | None = None) -> Challenge | None
         http_status=http_status,
         frame_urls=frame_urls,
         body=body if isinstance(body, str) else "",
+    )
+
+
+@dataclass
+class ChallengeLedger:
+    """How many times each check (vendor at an origin) has been met in this session."""
+
+    seen: dict[tuple[str, str], int] = field(default_factory=dict)
+
+    def record(self, origin: str, challenge: Challenge) -> int:
+        key = (origin, challenge.vendor)
+        self.seen[key] = self.seen.get(key, 0) + 1
+        return self.seen[key]
+
+    def clear(self, origin: str, challenge: Challenge) -> None:
+        self.seen.pop((origin, challenge.vendor), None)
+
+
+Solver = Callable[[dict[str, Any], Any], Awaitable[Any] | Any]
+"""``solver(info, page)``: ``info`` is the challenge with ``url`` and ``attempt``;
+``page`` is the live page. Its return value is reported, never trusted: the page is
+observed again to see whether the check is gone."""
+
+
+def load_solver(spec: str) -> Solver:
+    """``"package.module:function"`` to the callable it names."""
+    module_name, sep, attr = spec.partition(":")
+    if not sep or not module_name or not attr:
+        raise ValueError(f"captcha_solver must be 'module:function', got {spec!r}")
+    target = getattr(importlib.import_module(module_name), attr)
+    if not callable(target):
+        raise ValueError(f"captcha_solver {spec!r} is not callable")
+    return target
+
+
+async def run_solver(solver: Solver, info: dict[str, Any], page: Any) -> str:
+    """Call the solver; what it said, as a short string for the envelope and the audit."""
+    try:
+        answer = solver(info, page)
+        if inspect.isawaitable(answer):
+            answer = await answer
+    except Exception as exc:  # noqa: BLE001 - a broken solver is reported, not raised
+        return f"error: {type(exc).__name__}: {exc}"[:200]
+    return str(answer)[:200]
+
+
+def abandon_hint(challenge: Challenge, attempts: int) -> str:
+    return (
+        f"The same {challenge.vendor} check has stopped this {attempts} times. Do not "
+        "try again and do not look for another way past it: report it as blocked "
+        "(finish with outcome=blocked) and continue with what remains of the task."
     )
 
 

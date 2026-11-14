@@ -29,6 +29,7 @@ from fastmcp.tools.tool import ToolResult
 from mcp.types import TextContent
 
 from ..audit import _redact as redact_args
+from ..scrub import Scrubber
 from ..vision import payload_of
 from .spec import UAT_TOOLS
 
@@ -39,6 +40,7 @@ ACTION_TOOLS: frozenset[str] = frozenset(
         "reload_page",
         "click",
         "type_text",
+        "fill_credential",
         "press_key",
         "hover",
         "scroll",
@@ -70,6 +72,9 @@ NO_ATTEMPT: frozenset[str] = frozenset(
         "budget_exhausted",
         "finished",
         "blocked_by_uat_policy",
+        "wrong_origin",
+        "credential_unavailable",
+        "challenge_abandoned",
     }
 )
 """Statuses of an action that never reached the page. They are recorded but do
@@ -176,6 +181,11 @@ class RunRecorder:
         self.finding_count = 0
         self.verdicts: dict[str, str] = {}
         self.finished = False
+        # Secret values (a credential's password, a TOTP seed) never written or returned.
+        self.scrub = Scrubber()
+        # Set when the same bot check stopped the run ``challenge_max_attempts`` times:
+        # every browser tool after it is refused, as after finish.
+        self.abandoned: str | None = None
         self.last_url = ""
         self._entry_done = False
         self._system_depth = 0
@@ -209,6 +219,12 @@ class RunRecorder:
         """The envelope that stands in for the call, or None to let it through."""
         if tool in UAT_TOOLS:
             return None
+        if self.abandoned:
+            return {
+                "status": "challenge_abandoned",
+                "reason": self.abandoned,
+                "hint": "Report what you saw and call finish with outcome=blocked.",
+            }
         if self.finished:
             return {
                 "status": "finished",
@@ -309,6 +325,12 @@ class RunRecorder:
         step.counted = step.action and not step.system and status not in NO_ATTEMPT
         if step.counted:
             self.steps_used += 1
+        if status == "challenge_abandoned" and not self.abandoned:
+            vendor = (envelope.get("challenge") or {}).get("vendor", "a bot check")
+            self.abandoned = (
+                f"the same {vendor} check stopped the run {envelope.get('attempts')} times"
+            )
+            self.policy_event("challenge_abandoned", self.abandoned)
         if step.tool == "navigate" and step.system and not self._entry_done and not step.error:
             self._entry_done = status not in NO_ATTEMPT
         self._append(self.trace_path, asdict(step))
@@ -327,8 +349,9 @@ class RunRecorder:
     # --- events -----------------------------------------------------------------
 
     def _append(self, path: Path, row: dict[str, Any]) -> None:
+        line = json.dumps(row, ensure_ascii=False, default=str)
         with path.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
+            fh.write((self.scrub.text(line) if self.scrub else line) + "\n")
 
     def _event(self, event_type: str, **data: Any) -> dict[str, Any]:
         row = {"type": event_type, "ts": _now(), "step": len(self.steps), **data}
@@ -421,6 +444,23 @@ class RunRecorder:
         }
 
 
+def scrub_result(result: ToolResult, scrub: Scrubber) -> ToolResult:
+    """The result with every known secret replaced, before the trace or the model sees it."""
+    if not scrub:
+        return result
+    content = [
+        TextContent(type="text", text=scrub.text(item.text))
+        if isinstance(item, TextContent)
+        else item
+        for item in (result.content or [])
+    ]
+    structured = getattr(result, "structured_content", None)
+    return ToolResult(
+        content=content,
+        structured_content=scrub.data(structured) if structured is not None else None,
+    )
+
+
 def _refusal(envelope: dict) -> ToolResult:
     return ToolResult(
         content=[TextContent(type="text", text=json.dumps(envelope, ensure_ascii=False))],
@@ -444,7 +484,7 @@ class UatMiddleware(Middleware):
             return _refusal(refusal)
         step = self.recorder.begin(name, args)
         try:
-            result = await call_next(context)
+            result = scrub_result(await call_next(context), self.recorder.scrub)
         except Exception as exc:
             self.recorder.complete(
                 step, {"status": "error", "error": type(exc).__name__}, is_error=True

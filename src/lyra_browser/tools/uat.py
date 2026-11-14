@@ -144,3 +144,64 @@ def register(mcp: FastMCP, ctx: ServerContext, recorder: RunRecorder) -> None:
             "verdicts": len(recorder.verdicts),
             "missing_verdicts": recorder.missing_verdicts(),
         }
+
+
+def register_credentials(mcp: FastMCP, ctx: ServerContext, store, typer: dict) -> None:
+    """``fill_credential``: registered only when the spec names credentials.
+
+    ``typer["type_text"]`` is the raw ``type_text`` body, set once the server has listed
+    its tools; typing through it keeps every gate of ``type_text`` (actionability,
+    consent for ``submit``, the navigation guard, audit redaction)."""
+    from ..uat.credentials import fill_envelope
+    from .scope import page_origin
+
+    @mcp.tool
+    async def fill_credential(
+        name: str,
+        field: str,
+        selector: str,
+        submit: bool = False,
+        reason: str = "",
+        confirm: bool = False,
+    ) -> dict:
+        """Type one part of a stored login into ``selector`` without seeing it.
+
+        ``name`` is a credential your brief lists. ``field`` is ``username``,
+        ``password`` or ``totp`` (the current one-time code, computed now). It is typed
+        only on the credential's own site: anywhere else the answer is ``wrong_origin``
+        and nothing is typed. ``submit=true`` presses Enter afterwards and asks to send
+        the form, as ``type_text`` does. The value never appears in your results, the
+        trace or the report; what you get back is whether it was typed.
+        """
+        found, refused = fill_envelope(store, name, field)
+        if refused is not None:
+            ctx.audit.record("fill_credential", {"name": name, "field": field}, status="refused")
+            return refused
+        cred, value = found
+        try:
+            page = await ctx.session.page(revive=False)
+            here = page_origin(page).describe()
+        except Exception as exc:  # noqa: BLE001 - no page is an answer, not a crash
+            return {"status": "error", "reason": f"no page: {type(exc).__name__}"}
+        if here != cred.origin:
+            ctx.audit.record(
+                "fill_credential", {"name": name, "field": field}, status="wrong_origin"
+            )
+            return {
+                "status": "wrong_origin",
+                "credential": name,
+                "field": field,
+                "page_origin": here,
+                "credential_origin": cred.origin,
+                "hint": "Only type a credential on its own site. Navigate there first.",
+            }
+        result = await typer["type_text"](
+            selector=selector, value=value, submit=submit, reason=reason, confirm=confirm
+        )
+        status = result.get("status") if isinstance(result, dict) else "error"
+        ctx.audit.record(
+            "fill_credential",
+            {"name": name, "field": field, "selector": selector, "submit": submit},
+            status=status,
+        )
+        return {**(result if isinstance(result, dict) else {}), "credential": name, "field": field}
