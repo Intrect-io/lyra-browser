@@ -119,6 +119,7 @@ def build_run_spec(batch: BatchSpec, persona_id: str, runs_dir: Path) -> RunSpec
         hooks=batch.hooks,
         limits=batch.limits,
         tools=batch.tools,
+        credentials=batch.credentials,
         out_dir=runs_dir,
         data_dir=batch.data_dirs.get(persona_id),
         headless=batch.headless,

@@ -517,6 +517,12 @@ class Config:
     # denial. Five minutes suits a person at a screen; a gateway nobody is
     # watching wants it short (docs/HERMES_INTEGRATION.md).
     consent_timeout_s: float = 300.0
+    # How many times the same bot check (vendor at an origin) may stop the agent before
+    # navigate answers ``challenge_abandoned`` instead of ``challenge``.
+    challenge_max_attempts: int = 3
+    # ``"module:function"`` of an operator-installed solver an interactive bot check is
+    # handed to when nobody is attending. None: checks are named and handed over only.
+    captcha_solver: str | None = None
     # Sites the operator has pre-approved for NAVIGATE (and the INTERACT it
     # implies), so one they always use is not asked about again. Entry forms:
     # see parse_trusted_origins. An answer, not a consent channel, and never a
@@ -674,6 +680,10 @@ class Config:
             # substitutes an empty string, and that must not read as "off".
             follow_bypass=_as_optional_bool(_env("LYRA_BROWSER_FOLLOW_BYPASS")) is not False,
             consent_timeout_s=_as_float(_env("LYRA_BROWSER_CONSENT_TIMEOUT"), default=300.0),
+            challenge_max_attempts=max(
+                1, _as_int(_env("LYRA_BROWSER_CHALLENGE_MAX_ATTEMPTS"), default=3)
+            ),
+            captcha_solver=_env("LYRA_BROWSER_CAPTCHA_SOLVER") or None,
             trusted_origins=parse_trusted_origins(_env("LYRA_BROWSER_TRUSTED_ORIGINS")).entries,
             trusted_send_origins=parse_trusted_origins(
                 _env("LYRA_BROWSER_TRUSTED_SEND_ORIGINS")

@@ -34,6 +34,7 @@ ExitReason = Literal[
     "hook_failed",
     "no_finish",
     "interrupted",
+    "challenge_abandoned",
 ]
 OutcomeStatus = Literal["reached_goal", "partial", "blocked", "unknown"]
 
@@ -398,7 +399,14 @@ def build_report(
     else:
         if exit_reason is None or exit_reason == "finish":
             budget_hit = any(p.kind == "budget_exhausted" for p in policy_events)
-            reason = "budget_exhausted" if budget_hit else "no_finish"
+            walled = any(p.kind == "challenge_abandoned" for p in policy_events)
+            reason = (
+                "challenge_abandoned"
+                if walled
+                else "budget_exhausted"
+                if budget_hit
+                else "no_finish"
+            )
         else:
             reason = exit_reason
         status = (

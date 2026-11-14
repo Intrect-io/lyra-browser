@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastmcp import FastMCP
 
 from ..approval import TakeoverActive
-from ..challenge import hint_for, observe
+from ..challenge import abandon_hint, hint_for, load_solver, observe, run_solver
 from ..context import (
     ServerContext,
     acquire_page,
@@ -18,7 +18,7 @@ from ..enforcement import refused_by_guard, refused_envelope, wait_unless_refuse
 from ..origin import parse_origin
 from ..permission import Capability
 from ..profile_import import read_sidecar
-from .scope import released, require
+from .scope import page_origin, released, require
 
 # How long a navigation waits, by Playwright's own names. ``domcontentloaded``
 # stays the default: the document is parsed and usable, and a site that holds a
@@ -319,15 +319,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
                 result["hint"] = _NOT_A_FILE_HINT
             elif found := await observe(page, result["http_status"]):
                 # The page answered, but it is a bot check, not the page asked for.
-                result["status"] = "challenge"
-                result["challenge"] = found.as_dict()
-                result["hint"] = hint_for(found, ctx.config.attended)
-                ctx.audit.record(
-                    "challenge_seen",
-                    {"vendor": found.vendor, "kind": found.kind},
-                    status=found.kind,
-                    **audit_kw,
-                )
+                await _met_challenge(ctx, page, found, result, audit_kw)
             return result
 
     @mcp.tool
@@ -438,3 +430,50 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
                 return refused_envelope(page.url, redirected_to=hop)
             ctx.audit.record("reload_page", origin=current.describe())
             return {"status": "ok", "url": page.url, **_response_facts(response)}
+
+
+async def _met_challenge(ctx, page, found, result: dict, audit_kw: dict) -> None:
+    """Fill ``result`` for a page that is a bot check: name it, count it, hand it to the
+    operator's solver when there is one and nobody is watching, give up on it once the
+    same check has stopped the agent ``challenge_max_attempts`` times."""
+    from ..challenge import INTERACTIVE
+
+    origin = page_origin(page).describe()
+    attempts = ctx.challenges.record(origin, found)
+    limit = ctx.config.challenge_max_attempts
+    result["challenge"] = found.as_dict()
+    result["attempts"], result["max_attempts"] = attempts, limit
+    ctx.audit.record(
+        "challenge_seen",
+        {"vendor": found.vendor, "kind": found.kind, "attempt": attempts},
+        status=found.kind,
+        **audit_kw,
+    )
+    if attempts >= limit:
+        result["status"] = "challenge_abandoned"
+        result["hint"] = abandon_hint(found, attempts)
+        ctx.audit.record("challenge_abandoned", {"vendor": found.vendor}, **audit_kw)
+        return
+    if ctx.config.captcha_solver and found.kind == INTERACTIVE and not ctx.config.attended:
+        info = {**found.as_dict(), "url": page.url, "attempt": attempts}
+        try:
+            solver = load_solver(ctx.config.captcha_solver)
+        except Exception as exc:  # noqa: BLE001 - a missing solver is reported
+            said = f"error: {type(exc).__name__}: {exc}"[:200]
+        else:
+            said = await run_solver(solver, info, page)
+        result["solver"] = said
+        cleared = await observe(page)
+        ctx.audit.record(
+            "challenge_solver",
+            {"vendor": found.vendor, "said": said, "cleared": cleared is None},
+            **audit_kw,
+        )
+        if cleared is None:
+            ctx.challenges.clear(origin, found)
+            result["status"] = "ok"
+            result["challenge_solved"] = found.vendor
+            result["url"], result["title"] = page.url, await page.title()
+            return
+    result["status"] = "challenge"
+    result["hint"] = hint_for(found, ctx.config.attended)

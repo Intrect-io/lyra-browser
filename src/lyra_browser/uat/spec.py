@@ -132,6 +132,9 @@ class Target(Strict):
     # Requests whose URL matches one of these regexes are kept in full
     # (query string, POST body) in ``network.jsonl``; everything else is a summary.
     network_capture: list[str] = Field(default_factory=list)
+    # ``"module:function"``: an interactive bot check is handed to it (the run is never
+    # attended). lyra ships none; see ``lyra_browser.challenge``.
+    captcha_solver: str | None = None
 
     @model_validator(mode="after")
     def _closed_needs_a_site(self) -> Target:
@@ -213,6 +216,30 @@ class ToolPolicy(Strict):
     deny: list[str] = Field(default_factory=list)
 
 
+class CredentialRef(Strict):
+    """A login the server types for the persona, by name. The spec says where each secret
+    lives (an environment variable or a file), never the secret: the run file, the trace
+    and the report hold this and nothing more. ``origin`` is the one site it may be typed
+    into (``https://app.example.com``); ``totp`` is a base32 seed the code is computed from
+    when it is typed."""
+
+    origin: str
+    username: str = ""
+    username_env: str | None = None
+    password_env: str | None = None
+    password_file: Path | None = None
+    totp_env: str | None = None
+    totp_file: Path | None = None
+
+    @model_validator(mode="after")
+    def _one_source_each(self) -> CredentialRef:
+        if self.password_env and self.password_file:
+            raise ValueError("give password_env or password_file, not both")
+        if self.totp_env and self.totp_file:
+            raise ValueError("give totp_env or totp_file, not both")
+        return self
+
+
 class PriorFinding(Strict):
     """A finding from an earlier round the persona re-checks and judges."""
 
@@ -263,6 +290,8 @@ class RunSpec(Strict):
     hooks: Hooks = Field(default_factory=Hooks)
     limits: Limits = Field(default_factory=Limits)
     tools: ToolPolicy = Field(default_factory=ToolPolicy)
+    # Logins the persona may use through ``fill_credential``, by name.
+    credentials: dict[str, CredentialRef] = Field(default_factory=dict)
     # Where run directories are created: ``<out_dir>/<run_id>/``.
     out_dir: Path = Path("uat-runs")
     # The browser profile. None: a fresh one inside the run directory. Set: an
@@ -303,6 +332,8 @@ class RunSpec(Strict):
         allowed = list(self.tools.allow) if self.tools.allow is not None else list(DEFAULT_TOOLS)
         if self.persona.uploads_allowed_dir is not None and "upload_file" not in allowed:
             allowed.append("upload_file")
+        if self.credentials and "fill_credential" not in allowed:
+            allowed.append("fill_credential")
         denied = set(self.tools.deny)
         return [name for name in allowed if name not in denied]
 
@@ -332,6 +363,7 @@ class BatchSpec(Strict):
     hooks: Hooks = Field(default_factory=Hooks)
     limits: Limits = Field(default_factory=Limits)
     tools: ToolPolicy = Field(default_factory=ToolPolicy)
+    credentials: dict[str, CredentialRef] = Field(default_factory=dict)
     out_dir: Path = Path("uat-runs")
     # Persona id -> browser profile (``LYRA_BROWSER_DATA_DIR`` layout) that already holds
     # its login. Required for ``preseeded`` personas; others get a fresh profile.
