@@ -1825,6 +1825,14 @@ def loadavg_1m() -> float:
     return os.getloadavg()[0]
 
 
+def runnable_now() -> int:
+    """Processes runnable at this instant (the fourth field of /proc/loadavg), 0 if unknown."""
+    try:
+        return int(Path("/proc/loadavg").read_text().split()[3].split("/")[0])
+    except (OSError, IndexError, ValueError):
+        return 0
+
+
 @contextlib.contextmanager
 def held_load(target: float, *, warmup_s: float = 300.0) -> Iterator[None]:
     """Busy processes until the 1-minute load average reads ``target``, kept for the duration.
@@ -1838,9 +1846,10 @@ def held_load(target: float, *, warmup_s: float = 300.0) -> Iterator[None]:
     if target <= 0:
         yield
         return
-    # What the host already carries counts: add enough runnable processes to reach the
-    # target on top of it, plus a margin for the average's lag.
-    spawn = max(1, int(target - loadavg_1m()) + 8)
+    # What the host carries right now counts (the runnable count of /proc/loadavg, not the
+    # average, which still holds whatever an earlier run left): add enough busy processes
+    # to reach the target on top of it, plus a margin.
+    spawn = max(1, int(target) - runnable_now() + 8)
     procs = [
         subprocess.Popen(
             [sys.executable, "-I", "-c", "while True: pass"],
