@@ -545,8 +545,15 @@ cursor travel, since its box is in the frame's coordinates.
 Bot checks: the overlay and DOM agents are switched on only when the cursor first moves,
 i.e. on a pointer action, never by `open_browser` or `navigate`, so the launch and
 navigation measured under "Looking like the user's Chrome" are unchanged. Whether a site
-that watches the DevTools agents during interaction notices them is not measured;
-`LYRA_BROWSER_CURSOR=off` is the switch if one does.
+notices them during interaction was measured 2026-11-19 with `scripts/measure_compat.py
+--headful --cells cursor-on,cursor-off --sites etsy,hyatt --reps 5 --gap 12` (Chrome
+157.0.8103.38, native driver, `cdp` guard, Xvfb, fresh profile per visit; each visit
+navigates, waits for the page to settle, hovers at a point of a screenshot, then judges the
+page again): **etsy.com 5/5 with the cursor and 5/5 without; hyatt.com 5/5 and 5/5**, every
+page answering 200 with its own title after the hover. On one hyatt visit with the cursor the
+hover answered `blocked_by_policy` (a navigation started after it that nothing had declared)
+and the tab ended on hyatt.com's `/loyalty` page, judged fine; what started it was not traced. The cursor therefore
+stays on by default; `LYRA_BROWSER_CURSOR=off` is the switch for a site that does notice.
 
 ### Measured: tasks that need sight (`docs/measurements/visual-eval`)
 
