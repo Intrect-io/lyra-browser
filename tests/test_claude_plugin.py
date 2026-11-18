@@ -83,13 +83,14 @@ def test_hook_file_wraps_the_event_map_and_quotes_the_plugin_root():
     assert script.is_file() and script.stat().st_mode & 0o111, script
 
 
-def _stamp_for(root: Path) -> str:
-    """bootstrap.sh's stamp: pyproject + lock + the install path."""
+def _stamp_for(root: Path, *, lock: bool = True) -> str:
+    """bootstrap.sh's stamp (stamp.sh): pyproject + lock + the install path."""
     import hashlib
 
     h = hashlib.sha256()
     h.update((root / "pyproject.toml").read_bytes())
-    h.update((root / "uv.lock").read_bytes())
+    if lock:
+        h.update((root / "uv.lock").read_bytes())
     h.update(f"root={root}\n".encode())
     return h.hexdigest()
 
@@ -190,3 +191,119 @@ def test_claude_plugin_validate_passes_strictly_on_the_shipped_tree(tmp_path):
         timeout=120,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# --- dev-install.sh: the installed plugin's venv on a checkout's code -------------------
+
+
+def _fake_uv(tmp_path: Path) -> Path:
+    """A `uv` that records its arguments and builds a stub server where `sync` points."""
+    bin_dir = tmp_path / "fakebin"
+    bin_dir.mkdir()
+    uv = bin_dir / "uv"
+    uv.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf \'%s\\n\' "$@" > "$UV_PROJECT_ENVIRONMENT.args"\n'
+        'mkdir -p "$UV_PROJECT_ENVIRONMENT/bin"\n'
+        "printf '#!/bin/sh\\n' > \"$UV_PROJECT_ENVIRONMENT/bin/lyra-browser\"\n"
+        'chmod +x "$UV_PROJECT_ENVIRONMENT/bin/lyra-browser"\n'
+    )
+    uv.chmod(0o755)
+    return bin_dir
+
+
+def _dev_install(*args: str, home: Path, path: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [str(ROOT / "scripts" / "claude-plugin" / "dev-install.sh"), *args],
+        env={"PATH": path, "HOME": str(home)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def test_dev_install_stamps_for_the_installed_root_so_bootstrap_keeps_it(tmp_path):
+    installed = tmp_path / "cache" / "0.4.1"
+    shutil.copytree(
+        ROOT,
+        installed,
+        ignore=shutil.ignore_patterns(
+            ".git", ".venv", "worktrees", "trash", "testing", "node_modules"
+        ),
+    )
+    data = tmp_path / "data"
+    fakebin = _fake_uv(tmp_path)
+    result = _dev_install(
+        "--data",
+        str(data),
+        "--installed-root",
+        str(installed),
+        home=tmp_path,
+        path=f"{fakebin}:/usr/bin:/bin",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == ""
+    args = (data / "venv.args").read_text().split("\n")
+    # The checkout is what gets installed; the installed root is only what it is stamped for.
+    assert args[args.index("--project") + 1] == str(ROOT)
+    assert {"--frozen", "--no-dev", "--no-editable"} <= set(args)
+    assert (data / "venv.stamp").read_text().strip() == _stamp_for(installed)
+    # And bootstrap, launched for the installed root, finds the stamp and does nothing.
+    boot = subprocess.run(
+        [str(installed / "scripts" / "claude-plugin" / "bootstrap.sh")],
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": str(tmp_path),
+            "CLAUDE_PLUGIN_ROOT": str(installed),
+            "CLAUDE_PLUGIN_DATA": str(data),
+        },
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert boot.returncode == 0 and boot.stderr == "" and not (data / "bootstrap.log").exists()
+
+
+def test_dev_install_finds_the_installed_root_in_the_registry(tmp_path):
+    installed = tmp_path / "cache" / "0.4.1"
+    installed.mkdir(parents=True)
+    shutil.copy(ROOT / "pyproject.toml", installed)
+    registry = tmp_path / ".claude" / "plugins" / "installed_plugins.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "plugins": {
+                    "lyra-browser@lyra-browser": [
+                        {"scope": "user", "installPath": str(installed), "version": "0.4.1"}
+                    ]
+                },
+            }
+        )
+    )
+    fakebin = _fake_uv(tmp_path)
+    result = _dev_install(home=tmp_path, path=f"{fakebin}:/usr/bin:/bin")
+    assert result.returncode == 0, result.stderr
+    data = tmp_path / ".claude" / "plugins" / "data" / "lyra-browser-lyra-browser"
+    assert (data / "venv.stamp").read_text().strip() == _stamp_for(installed, lock=False)
+
+
+def test_dev_install_refuses_without_an_installed_plugin(tmp_path):
+    result = _dev_install(home=tmp_path, path="/usr/bin:/bin")
+    assert result.returncode == 1
+    assert "installed_plugins.json" in result.stderr
+
+
+def test_dev_install_verify_fails_on_a_missing_environment(tmp_path):
+    result = _dev_install(
+        "--data",
+        str(tmp_path / "none"),
+        "--installed-root",
+        str(ROOT),
+        "--verify",
+        home=tmp_path,
+        path="/usr/bin:/bin",
+    )
+    assert result.returncode == 1
+    assert "no environment" in result.stderr
