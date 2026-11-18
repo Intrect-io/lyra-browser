@@ -629,6 +629,36 @@ send is asked about even where nothing would be posted, because the declaration 
 covers a send by `fetch` that the enforcement layer cannot see. N=2 per task is small; the
 per-task numbers say which tasks moved, not by how much.
 
+### Measured: harder tasks, before and after zoom and compare (`docs/measurements/visual-eval/v2`)
+
+`scripts/eval_visual.py --suite v2` serves eight harder tasks, each answered by a click so
+that no consent prompt is involved: 4-character codes drawn 5 px tall among one-character
+near misses, the tallest of 60 bars (the top two 1 px apart), a target 2,600 px below the
+fold, labels drawn only while the pointer is over a nameless button, the one tile that moved
+1 px or was shaded slightly after Deploy, a card whose text is cut off by a box of the card's
+colour, the card whose text has the lowest contrast, and the one of 36 boxes 1-2 px out of
+line. Same harness as above (`claude-code` brain, headless, step budget 25, 2 repeats,
+Chrome 157.0.8103.38). A first cut with easier settings was solved 16/16 by Sonnet and is
+kept as `pilot-first-cut.json`.
+
+| | before (master `6765bfb`/`a1cd4c6`, no zoom or compare) | after (`6526831`, zoom and compare) |
+| --- | --- | --- |
+| Sonnet (`baseline.json` → `after.json`) | **16/16** | **16/16** |
+| Haiku (`baseline-haiku.json` → `after-haiku.json`) | **12/16** | **12/16** |
+| Haiku `tiny_find` | 1/2 | 2/2 |
+| Haiku `overlap` | 1/2 | 0/2 |
+| Haiku `regression`, `faint_text` | 1/2 each | 1/2 each |
+| Haiku, the other four | 2/2 each | 2/2 each |
+
+Sonnet solves every v2 task with plain screenshots, marks and hovers, so this suite cannot
+show a tool helping it; it shows that nothing regressed. Haiku used the new tools: in the
+after run 7 of its 16 episodes zoomed (`screenshot(region=...)`), 4 kept a named snapshot,
+and 1 compared with one. Its tiny-text task went from 1/2 to 2/2, both times after zooming
+in on the tiles; overall it stayed at 12/16. Its one `regression` miss is the same step in
+both runs: it pressed Deploy and finished without picking a tile (in the after run having
+named a snapshot first, never compared with it). N=2 per task: this says which tasks a
+model gets wrong and whether it reached for the tools, not that zoom raises a success rate.
+
 ## Permissions
 
 The agent declares what it intends; the browser is judged on what it actually
