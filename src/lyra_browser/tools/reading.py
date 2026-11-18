@@ -25,6 +25,7 @@ from dataclasses import dataclass
 
 from fastmcp import FastMCP
 
+from .. import cursor
 from ..capture import envelope, save_capture, take
 from ..challenge import hint_for, observe
 from ..context import ServerContext, acquire_page
@@ -576,6 +577,9 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         page, err = await acquire_page(ctx, claim=False)
         if err:
             return err
+        # A navigation clears the overlay: the cursor is drawn again where it last
+        # acted, so the picture shows what the person at the window sees.
+        await cursor.redraw(ctx, page)
         png = await take(lambda: page.screenshot(full_page=full_page))
         path = save_capture(ctx.config, png, kind="page")
         ctx.audit.record(
