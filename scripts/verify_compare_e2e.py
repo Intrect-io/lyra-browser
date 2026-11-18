@@ -119,6 +119,16 @@ async def run_mode(base: str, *, headless: bool) -> None:
         expect((await tools["open_browser"]()).get("status") == "ok", "browser launches")
         await reload(tools, base)
         page, _ = await acquire_page(ctx)
+        # A headful window can still be growing to its size just after launch (measured on
+        # Playwright headful: a first capture at 317x164); that would be a true viewport
+        # mismatch, not what this gate is about.
+        size = None
+        for _ in range(50):
+            now = await ev(page, "() => [innerWidth, innerHeight]")
+            if now == size and now[0] >= 800:
+                break
+            size = now
+            await asyncio.sleep(0.2)
 
         res = await tools["screenshot"](compare_to="nothing")
         expect(res.get("status") == "not_found", "comparing with an unknown name is refused", res)

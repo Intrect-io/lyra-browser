@@ -122,24 +122,31 @@ def diff(before_png: bytes, after_png: bytes) -> tuple[float, list[list[int]]]:
     return changed / total, boxes[:MAX_BOXES]
 
 
-# Two boxes whose tops and bottoms (or lefts and rights) agree within this many px ...
+# Two boxes whose tops and bottoms (or lefts and rights) agree within this many px,
 ALIGN = 3
-# ... and that are at most this many times their shared extent apart are one change.
-SPAN_GAP = 2.0
+# one of them a sliver at most this thin across (the edge an element left or reached),
+SLIVER = 8
+# and at most this many times their shared extent apart, are one element that moved.
+SPAN_GAP = 4.0
 
 
 def _aligned(a: list[int], b: list[int]) -> bool:
-    """Edges of one thing that moved or changed: same extent on one axis, close on the other.
+    """The two edges of one element that moved.
 
-    An element shifted by 3 px changes at its leading and trailing edges (and wherever its
-    content moved), which are separate regions with the same top and bottom.
+    An element shifted by 3 px changes in a 3 px sliver at its leading and trailing edges
+    (and wherever its content moved): separate regions with the same top and bottom, at
+    least one of them thin. Two whole tiles recoloured side by side are neither thin, so
+    they stay two boxes.
     """
     for lo, size in ((1, 3), (0, 2)):
         far, fsize = 1 - lo, 5 - size
-        if abs(a[lo] - b[lo]) <= ALIGN and abs(a[lo] + a[size] - b[lo] - b[size]) <= ALIGN:
-            gap = max(a[far], b[far]) - min(a[far] + a[fsize], b[far] + b[fsize])
-            if gap <= SPAN_GAP * max(a[size], b[size]):
-                return True
+        if abs(a[lo] - b[lo]) > ALIGN or abs(a[lo] + a[size] - b[lo] - b[size]) > ALIGN:
+            continue
+        if min(a[fsize], b[fsize]) > SLIVER:
+            continue
+        gap = max(a[far], b[far]) - min(a[far] + a[fsize], b[far] + b[fsize])
+        if gap <= SPAN_GAP * max(a[size], b[size]):
+            return True
     return False
 
 
