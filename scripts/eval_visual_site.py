@@ -47,6 +47,12 @@ GOALS: dict[str, str] = {
 }
 TASKS: tuple[str, ...] = tuple(GOALS)
 
+# Suite v2 (harder tasks) lives in its own module; v1 above stays as measured.
+from eval_visual_site_v2 import GOALS_V2, TASKS_V2, page_v2, record_v2, reset_v2  # noqa: E402
+
+SUITES: dict[str, tuple[str, ...]] = {"v1": TASKS, "v2": TASKS_V2}
+ALL_GOALS: dict[str, str] = {**GOALS, **GOALS_V2}
+
 SHAPES = ("circle", "square", "triangle", "star")
 COLOURS = {"red": "#d62828", "green": "#2a9d3a", "blue": "#1d4ed8", "orange": "#f08c00"}
 ICONS = ("trash", "pencil", "star", "gear", "download", "heart")
@@ -104,14 +110,16 @@ class EvalSite:
         self.rng = random.Random(seed)
         self.lock = threading.Lock()
         self.state: dict[str, TaskState] = {}
-        for task in TASKS:
+        for task in ALL_GOALS:
             self.reset(task)
 
     # ---- rounds -----------------------------------------------------------------------
     def reset(self, task: str) -> None:
         rng = self.rng
         data: dict[str, Any]
-        if task == "canvas_target":
+        if task in GOALS_V2:
+            data = reset_v2(rng, task)
+        elif task == "canvas_target":
             cells = [(c, r) for c in range(3) for r in range(2)]
             rng.shuffle(cells)
             combos = [("star", "green")]
@@ -178,7 +186,11 @@ class EvalSite:
             st = self.state[task]
             st.events.append({"kind": kind, "value": value})
             d = st.data
-            if task == "canvas_target" and kind == "click":
+            if task in GOALS_V2:
+                decided = record_v2(task, d, st.events, kind, value)
+                if decided is not None:
+                    st.success = decided
+            elif task == "canvas_target" and kind == "click":
                 st.success = value == d["target"]
             elif task == "icon_toolbar" and kind == "click":
                 st.success = value == d["target"]
@@ -206,6 +218,9 @@ class EvalSite:
     # ---- pages --------------------------------------------------------------------------
     def page(self, task: str) -> str:
         d = self.solution(task)
+        if task in GOALS_V2:
+            title, body = page_v2(task, d)
+            return _page(task, title, d, body)
         return getattr(self, f"_page_{task}")(task, d)
 
     def _page_canvas_target(self, task: str, d: dict) -> str:
@@ -404,11 +419,11 @@ def make_handler(site: EvalSite) -> type[BaseHTTPRequestHandler]:
             url = urlparse(self.path)
             parts = url.path.strip("/").split("/")
             if url.path == "/":
-                links = "".join(f'<li><a href="/task/{t}">{t}</a></li>' for t in TASKS)
+                links = "".join(f'<li><a href="/task/{t}">{t}</a></li>' for t in ALL_GOALS)
                 return self._send(200, f"<!doctype html><title>eval</title><ul>{links}</ul>")
-            if len(parts) == 2 and parts[0] == "task" and parts[1] in GOALS:
+            if len(parts) == 2 and parts[0] == "task" and parts[1] in ALL_GOALS:
                 return self._send(200, site.page(parts[1]))
-            if len(parts) == 3 and parts[0] == "api" and parts[1] in GOALS:
+            if len(parts) == 3 and parts[0] == "api" and parts[1] in ALL_GOALS:
                 token = parse_qs(url.query).get("token", [""])[0]
                 if not secrets.compare_digest(token, site.token):
                     return self._json(403, {"error": "forbidden"})
@@ -426,7 +441,12 @@ def make_handler(site: EvalSite) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:  # noqa: N802 - http.server API
             parts = urlparse(self.path).path.strip("/").split("/")
-            if len(parts) == 3 and parts[0] == "api" and parts[1] in GOALS and parts[2] == "event":
+            if (
+                len(parts) == 3
+                and parts[0] == "api"
+                and parts[1] in ALL_GOALS
+                and parts[2] == "event"
+            ):
                 length = int(self.headers.get("Content-Length") or 0)
                 try:
                     body = json.loads(self.rfile.read(length) or b"{}")
