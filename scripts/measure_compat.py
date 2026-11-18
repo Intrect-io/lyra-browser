@@ -12,7 +12,7 @@ agent's own ``navigate``, then the same page-state heuristic as ``probe_document
 Cells:
   cdp            ``guard_backend="cdp"``: no route, swiftshader dropped (the new backend)
   route-master   ``guard_backend="route"`` with every launch default kept: what master ships
-  cursor-on      ``cdp``, then one ``hover`` once the page has settled, virtual cursor on
+  cursor-on      ``cdp``, then one ``hover`` at a screenshot point once settled; cursor on
   cursor-off     the same visit and hover with ``cursor=False``
 
 The cursor switches the Overlay and DOM agents on only at the first pointer action, so a
@@ -130,7 +130,12 @@ async def visit(cell: str, site: str, *, headless: bool, driver: str) -> dict:
         )
         if hover:
             row["first_verdict"] = row["verdict"]
-            moved = await tools["hover"](selector="body")
+            # By point, not by selector: a page whose <body> is not "actionable" (hyatt's,
+            # 2026-11-19) would refuse the hover before the cursor moved at all.
+            shot = await tools["screenshot"]()
+            scale = shot.get("scale") or 1.0
+            vw, vh = shot.get("viewport") or (800, 600)
+            moved = await tools["hover"](x=vw * scale / 2, y=vh * scale / 3)
             row["hover"] = moved.get("status")
             await asyncio.sleep(3)
             page = await ctx.session.page()
