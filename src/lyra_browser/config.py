@@ -526,6 +526,13 @@ class Config:
     # path. ``LYRA_BROWSER_CURSOR=off`` removes both. ``cursor_ms`` is the travel time.
     cursor: bool = True
     cursor_ms: int = 300
+    # The first open_browser on an empty lyra profile offers the user's own browser
+    # profiles to import, by elicitation (profile_onboard.py). Asked only where a person
+    # answers: never under ``autonomous``, ``legacy``, ``off`` or bypass. UAT turns it off.
+    first_run_import: bool = True
+    # Opt-in: each open_browser re-imports the profile the user imported, when its files
+    # changed since (same browser, profile and sites; ``LYRA_BROWSER_PROFILE_SYNC=1``).
+    profile_sync: bool = False
     # How long an unanswered prompt holds its tool call before it becomes a
     # denial. Five minutes suits a person at a screen; a gateway nobody is
     # watching wants it short (docs/HERMES_INTEGRATION.md).
@@ -715,6 +722,8 @@ class Config:
             ),
             sandbox=_as_bool(_env("LYRA_BROWSER_SANDBOX"), default=True),
             cursor=_as_optional_bool(_env("LYRA_BROWSER_CURSOR")) is not False,
+            first_run_import=_as_optional_bool(_env("LYRA_BROWSER_FIRST_RUN_IMPORT")) is not False,
+            profile_sync=_as_optional_bool(_env("LYRA_BROWSER_PROFILE_SYNC")) is True,
             cursor_ms=_as_int(
                 _env("LYRA_BROWSER_CURSOR_MS"),
                 default=cls.__dataclass_fields__["cursor_ms"].default,

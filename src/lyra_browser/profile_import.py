@@ -204,6 +204,35 @@ def resolve_profile(browser: str, user_data_dir: Path, wanted: str) -> SourcePro
     raise ImportError_(f"no profile {wanted!r} in {user_data_dir}; found: {known or 'none'}")
 
 
+def discover_profiles(limit: int = 12) -> list[SourceProfile]:
+    """Every importable profile of every Chromium-family browser here, at most ``limit``."""
+    found: list[SourceProfile] = []
+    for browser, root in browser_roots().items():
+        found.extend(list_profiles(browser, root))
+    return found[:limit]
+
+
+def source_stamp(source: SourceProfile) -> str:
+    """A digest of the sizes and times of what an import reads from ``source``.
+
+    Equal stamps mean the source has not written any of those files since; it is how
+    a sync on open (``LYRA_BROWSER_PROFILE_SYNC``) tells a profile worth re-importing.
+    """
+    profile = source.path
+    sigs: dict[str, tuple[int, int]] = {}
+    rel = cookie_path(profile)
+    for name in [rel] + [rel + suffix for suffix in _COOKIE_SIDE_SUFFIXES]:
+        with contextlib.suppress(OSError):
+            st = (profile / name).stat()
+            sigs[name] = (st.st_size, st.st_mtime_ns)
+    for component in ("Local Storage", "IndexedDB", "WebStorage"):
+        if (profile / component).is_dir():
+            for key, sig in _tree_signature(profile / component).items():
+                sigs[f"{component}/{key}"] = sig
+    blob = json.dumps(sorted(sigs.items())).encode()
+    return hashlib.sha256(blob).hexdigest()
+
+
 def source_version(user_data_dir: Path) -> str:
     """The browser version that last wrote this user data dir ("" if unknown)."""
     try:
@@ -811,6 +840,8 @@ def _import_locked(
     shutil.rmtree(staging, ignore_errors=True)
     staging.mkdir(parents=True)
     components: dict[str, str] = {}
+    # Before reading: a source written to during the copy then reads as changed next time.
+    stamp = source_stamp(source)
     try:
         cookies = CookieReport()
         src_cookies = source.path / cookie_path(source.path)
@@ -861,6 +892,7 @@ def _import_locked(
             "keyring": keyring,
             "cookies": dataclasses.asdict(cookies),
             "components": components,
+            "source_stamp": stamp,
         }
         if dry_run:
             return ImportResult(source, cookies, components, sidecar, keyring)
@@ -985,9 +1017,11 @@ __all__ = [
     "Scope",
     "SourceProfile",
     "browser_roots",
+    "discover_profiles",
     "import_profile",
     "list_profiles",
     "pinned_candidates",
     "read_sidecar",
     "resolve_profile",
+    "source_stamp",
 ]

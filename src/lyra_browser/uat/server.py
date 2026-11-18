@@ -75,6 +75,8 @@ def build_config(spec: RunSpec, run_dir: Path) -> Config:
         denied_origins=tuple(spec.target.deny_origins),
         # Unattended: nobody answers, so a prompt is a refusal — fail fast.
         consent_timeout_s=1.0,
+        # A persona starts from its own profile, never the operator's logins.
+        first_run_import=False,
         trusted_origins=tuple(spec.all_trusted_origins()),
         trusted_send_origins=tuple(spec.target.trusted_send_origins),
         guard_backend=spec.guard_backend,

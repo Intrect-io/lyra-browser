@@ -2,7 +2,8 @@
 
 A command for the person at the keyboard, not a tool for the model: whoever runs
 it decides that the agent may act as them on those sites. See profile_import.py
-for what moves and how.
+for what moves and how, and profile_onboard.py for the two ways ``open_browser``
+reaches the same import (a first-run question the user answers, an opt-in sync).
 """
 
 from __future__ import annotations

@@ -71,6 +71,12 @@
       "type": "boolean",
       "title": "Headless",
       "description": "Run without a visible window. Leave unset for a window wherever one can open; with no window, highlight, ask-the-user and takeover answer unattended."
+    },
+    "profile_sync": {
+      "type": "boolean",
+      "title": "Sync the imported profile",
+      "description": "Each time the browser opens, re-import the browser profile you imported into lyra (same profile and sites) if it changed since. What it imports replaces lyra's own cookies for those sites. Off by default.",
+      "default": false
     }
   },
   "mcpServers": {
@@ -84,7 +90,8 @@
         "LYRA_BROWSER_CONSENT_TIMEOUT": "${user_config.consent_timeout}",
         "LYRA_BROWSER_GUARD": "${user_config.guard}",
         "LYRA_BROWSER_HEADLESS": "${user_config.headless}",
-        "LYRA_BROWSER_FOLLOW_BYPASS": "${user_config.follow_bypass}"
+        "LYRA_BROWSER_FOLLOW_BYPASS": "${user_config.follow_bypass}",
+        "LYRA_BROWSER_PROFILE_SYNC": "${user_config.profile_sync}"
       },
       "timeout": 900000
     }

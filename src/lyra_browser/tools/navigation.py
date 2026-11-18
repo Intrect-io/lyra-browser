@@ -18,6 +18,7 @@ from ..enforcement import refused_by_guard, refused_envelope, wait_unless_refuse
 from ..origin import parse_origin
 from ..permission import Capability
 from ..profile_import import read_sidecar
+from ..profile_onboard import offer_first_run, sync_on_open
 from .scope import released, require
 
 # How long a navigation waits, by Playwright's own names. ``domcontentloaded``
@@ -131,7 +132,18 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
 
         If no browser is installed this returns a ``browser_unavailable`` envelope
         (relay it so the user can install Chrome) rather than failing.
+
+        Before the first launch on an empty profile the user may be asked whether to
+        import one of their own browser profiles; ``profile_import`` says what came of
+        it, ``profile_sync`` what an operator-enabled re-import did. Neither is yours
+        to answer or retry.
         """
+        # Before the launch: an import needs the profile lock a live browser holds.
+        conflict = await claim_session(ctx)
+        if conflict is not None:
+            return conflict
+        onboarded = await offer_first_run(ctx)
+        synced = await sync_on_open(ctx)
         page, err = await acquire_page(ctx)
         if err:
             return err
@@ -168,6 +180,15 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
                 f"The persistent display {lost} is not up, so this session is headless. "
                 "The user can check it with `lyra-browser vnc status`."
             )
+        if onboarded is not None:
+            result["profile_import"] = onboarded
+            if onboarded["status"] == "failed":
+                notes.append(
+                    "The user chose to import a browser profile and the import could not "
+                    "run (profile_import.reason); this window has lyra's own, empty profile."
+                )
+        if synced is not None:
+            result["profile_sync"] = synced
         imported = read_sidecar(ctx.config) if result["profile"] == "shared" else None
         if imported:
             result["imported_from"] = {

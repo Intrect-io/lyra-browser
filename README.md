@@ -1018,6 +1018,31 @@ runs it decides that the agent may act as them on those sites. `--client` and
 `--data-dir` pick whose lyra profile receives it, as for the server. `open_browser`
 then reports `imported_from` and says, in its note, that on those sites the agent
 acts as the user.
+In Claude Code, `/lyra-browser:import-profile` walks through the same commands.
+
+**The first open asks.** The first `open_browser` on an empty lyra profile (never
+imported into, never asked about, no cookie file yet) lists the browser profiles on
+this machine and asks the user, by MCP elicitation, whether to import one before the
+window opens. The question goes to the client and the answer comes from it, so the
+model neither sees the list nor answers it; the reply only carries `profile_import`
+(`imported`, `skipped`, `failed` with a reason, or `unanswered`). Skip is the default,
+and an accept without a choice (an approval-only client such as Hermes) is a skip.
+It is not asked under the `autonomous`, `legacy` or `off` consent channels, in Claude
+Code's bypass mode, from a client without elicitation, or with
+`LYRA_BROWSER_FIRST_RUN_IMPORT=off`; UAT runs never ask. An answer either way is
+kept in `<data_dir>/profile-first-run.json`, so it is asked once. A failed import (a
+locked keyring, say) leaves the window on lyra's empty profile and is offered again
+next time.
+
+**Sync on open (opt-in).** With `LYRA_BROWSER_PROFILE_SYNC=1` (the plugin's "Sync the
+imported profile" option), each `open_browser` that launches the browser compares the
+imported profile's files with what the last import read (`source_stamp` in
+`profile-import.json`: sizes and times of the cookie file and the storage trees) and,
+when they changed, imports it again with the same browser, profile and sites. The
+reply's `profile_sync` says `synced`, `unchanged`, `skipped` or `failed` (with a
+reason); it never prompts, never unlocks a keyring, and a sync that cannot run leaves
+the profile as it was. Like any re-import it replaces lyra's own cookies for the
+sites in scope.
 
 What moves, from `<profile>` into lyra's `profile/Default`, and nothing else:
 
@@ -1113,6 +1138,8 @@ throwaway keyring.
 | `LYRA_BROWSER_CAPTURE_SETTLE_MS` | `1000` | How long a `screenshot` first waits for the page to stop changing on screen. `0` captures at once. |
 | `LYRA_BROWSER_CURSOR` | on | The virtual cursor (see Seeing the page): a pointer drawn with the DevTools overlay that travels to each click, hover, typed field and picked option, the real mouse moving along the same path. `off` removes both. |
 | `LYRA_BROWSER_CURSOR_MS` | `300` | How long the cursor takes to travel to a target. |
+| `LYRA_BROWSER_FIRST_RUN_IMPORT` | on | The first `open_browser` on an empty profile offers the user's own browser profiles to import, by elicitation (see Using your own Chrome logins). `off` never asks. |
+| `LYRA_BROWSER_PROFILE_SYNC` | off | `1`: each launch re-imports the imported profile when its files changed since the last import. |
 | `LYRA_BROWSER_DOWNLOAD_DIR` | — | Where declared downloads are saved. Default `<data_dir>/downloads`. |
 | `LYRA_BROWSER_DOWNLOAD_KEEP` | `200` | Saved downloads kept; oldest are deleted first, and only files this server saved (tracked in a ledger in the dir). `0` keeps all. |
 | `LYRA_BROWSER_DOWNLOAD_MAX_BYTES` | `209715200` | Largest file a download may be (200 MiB); a bigger one is cancelled and answered `download_failed` (`too_large`). |
