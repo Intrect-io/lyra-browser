@@ -22,6 +22,7 @@ import base64
 import functools
 import io
 import time
+import weakref
 from dataclasses import dataclass
 from typing import Any
 
@@ -48,6 +49,29 @@ class Thumb:
     viewport: dict | None = None  # the layout viewport it was taken of
 
 
+# The layout viewport, kept per page for a moment: actions come in runs, and asking for
+# the metrics again is one more DevTools round trip on every thumbnail.
+_VIEWPORT_TTL_S = 2.0
+_viewports: weakref.WeakKeyDictionary[Any, tuple[float, dict]] = weakref.WeakKeyDictionary()
+
+
+def _recent_viewport(page: Any) -> dict | None:
+    try:
+        got = _viewports.get(page)
+    except TypeError:
+        return None
+    if got and time.monotonic() - got[0] < _VIEWPORT_TTL_S:
+        return got[1]
+    return None
+
+
+def _remember_viewport(page: Any, vp: dict) -> None:
+    try:
+        _viewports[page] = (time.monotonic(), vp)
+    except TypeError:
+        pass
+
+
 async def thumb(page: Any, viewport: dict | None = None) -> Thumb | None:
     """A grey quarter-scale thumbnail of the viewport, or None if it cannot be had.
 
@@ -57,10 +81,11 @@ async def thumb(page: Any, viewport: dict | None = None) -> Thumb | None:
     try:
         from PIL import Image
 
-        vp = viewport
+        vp = viewport or _recent_viewport(page)
         if vp is None:
             metrics = await cursor._send(page, "Page.getLayoutMetrics")
             vp = metrics.get("cssLayoutViewport") or metrics.get("layoutViewport") or {}
+            _remember_viewport(page, vp)
         width = float(vp.get("clientWidth") or 0)
         height = float(vp.get("clientHeight") or 0)
         if width <= 0 or height <= 0:
