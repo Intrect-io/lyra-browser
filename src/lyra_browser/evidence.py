@@ -96,6 +96,8 @@ async def thumb(page: Any, viewport: dict | None = None) -> Thumb | None:
             {
                 # PNG, not JPEG: compression noise at edges reads as change.
                 "format": "png",
+                # Faster, larger encoding: a thumbnail is compared and thrown away.
+                "optimizeForSpeed": True,
                 "fromSurface": True,
                 "clip": {
                     "x": float(vp.get("pageX", 0)),

@@ -518,8 +518,8 @@ Measured 2026-11-18 (Chrome 157, `scripts/verify_evidence_e2e.py`, native and Pl
 1.65.2 headless, native headful): a no-op click `changed: false`; a click showing a toast
 `changed: true` with the region over the toast; typing a change; a 700 ms transition
 settled within the wait, a never-ending animation answered `timeout` within 1.6 s of a 1 s
-budget. Median time evidence added to a click over N=20: 116–121 ms (cursor off in both
-arms).
+budget. Median time evidence added to a click, N=20 clicks per arm taken in alternation
+(cursor off in both arms): 79–81 ms over four runs (native headless and headful).
 
 ### The virtual cursor
 

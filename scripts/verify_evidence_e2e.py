@@ -79,14 +79,22 @@ def intersects(a, b) -> bool:
     return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
 
 
-async def median_click_ms(tools) -> float:
-    times = []
+async def ab_click_ms(ctx, tools) -> tuple[float, float]:
+    """Median click time with evidence on and off, measured in alternation.
+
+    Interleaved rather than one block after the other, so a host whose load changes
+    during the run (other jobs, a CodeQL scan) weighs on both arms alike.
+    """
+    on, off = [], []
     for _ in range(N_LATENCY):
-        started = time.perf_counter()
-        res = await tools["click"](selector="#noop")
-        times.append((time.perf_counter() - started) * 1000)
-        assert res.get("status") == "ok", res
-    return statistics.median(times)
+        for flag, times in ((False, off), (True, on)):
+            ctx.config.evidence = flag
+            started = time.perf_counter()
+            res = await tools["click"](selector="#noop")
+            times.append((time.perf_counter() - started) * 1000)
+            assert res.get("status") == "ok", res
+    ctx.config.evidence = True
+    return statistics.median(on), statistics.median(off)
 
 
 async def run_mode(base: str, *, headless: bool) -> None:
@@ -142,10 +150,7 @@ async def run_mode(base: str, *, headless: bool) -> None:
         expect(res["waited_ms"] < 2500, "and within its budget", res["waited_ms"])
 
         ctx.config.cursor = False
-        ctx.config.evidence = False
-        off_ms = await median_click_ms(tools)
-        ctx.config.evidence = True
-        on_ms = await median_click_ms(tools)
+        on_ms, off_ms = await ab_click_ms(ctx, tools)
         added = on_ms - off_ms
         print(
             f"[{mode}] click median over {N_LATENCY}: evidence on {on_ms:.0f} ms, "
