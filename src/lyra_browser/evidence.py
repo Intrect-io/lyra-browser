@@ -267,8 +267,54 @@ def around(ctx: Any):
                 shot = await capture_page(ctx, now, tool=f"{fn.__name__}.capture", kind="action")
                 result["image_path"] = shot["image_path"]
                 result["capture"] = {k: shot[k] for k in ("width", "height", "scale") if k in shot}
+            if now is page and now is not None:
+                await point_the_next_look(ctx, now, result)
             return result
 
         return wrapper
 
     return wrap
+
+
+async def point_the_next_look(ctx: Any, page: Any, reply: dict) -> None:
+    """Make the next look cheap: where the change is in the latest screenshot's pixels
+    (``region_px``, ready for ``screenshot(region=...)``), and, when named snapshots are
+    held, which one to compare with."""
+    change = reply.get("visual_change")
+    if not isinstance(change, dict):
+        return
+    region = change.get("region")
+    if region:
+        px = await region_in_latest(page, region)
+        if px is not None:
+            change["region_px"] = px
+    snapshots = getattr(ctx, "snapshots", None)
+    names = snapshots.names() if snapshots is not None else []
+    if change.get("changed") and names:
+        reply["snapshots"] = names
+        reply["compare_hint"] = (
+            f'screenshot(compare_to="{names[-1]}") shows what changed since that snapshot.'
+        )
+
+
+async def region_in_latest(page: Any, region: list) -> list[int] | None:
+    """A viewport CSS rect in pixels of the page's latest screenshot, or None.
+
+    None when there is no screenshot, when the latest is a zoomed region (its own small
+    frame), or when the page has scrolled since a viewport capture (its pixels moved).
+    """
+    from . import marks
+
+    geometry = marks.last(page)
+    if geometry is None or geometry.origin != (0.0, 0.0):
+        return None
+    now = await marks.page_geometry(page)
+    if now is None:
+        return None
+    x, y, w, h = (float(v) for v in region)
+    if geometry.full_page:
+        x, y = x + now[3], y + now[4]
+    elif abs(now[3] - geometry.scroll[0]) > 1 or abs(now[4] - geometry.scroll[1]) > 1:
+        return None
+    s = geometry.scale
+    return [round(x * s), round(y * s), round(w * s), round(h * s)]

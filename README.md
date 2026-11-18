@@ -525,6 +525,18 @@ after the action; what arrives later (a fetch, a slow animation) is for
 comparison (the overlay is drawn unscaled in a clipped capture, so it is masked where it
 stands and where the capture shows it).
 
+The reply also points at the next look. `visual_change.region_px` is the same region in
+pixels of the page's latest screenshot (its scale applied, and the scroll of a full-page
+capture), so it can go straight into `screenshot(region=...)` to zoom on what changed; it is
+left out when there is no screenshot of the page, when the latest is itself a zoom, or when
+the page has scrolled since. When `screenshot(name=...)` snapshots are held and the action
+changed the page, the reply lists them (`snapshots`) and `compare_hint` names the latest:
+`screenshot(compare_to="before") shows what changed since that snapshot.` Measured
+2026-11-19 (`scripts/verify_evidence_e2e.py`, Chrome 157.0.8103.38, native and Playwright
+1.65.2, native headful): `region_px` on a toast overlaps it in the screenshot with IoU >= 0.5
+at scale 1 and downscaled to 1000 px; the hint appears for a change with a snapshot held, not
+for a no-op or with none held; evidence still adds 80-81 ms to a click at the median (N=20).
+
 `capture=true` on any of those tools also returns the image after the action, cursor and
 all (`image_path`, attached as an image for clients that render them, and its `scale` for a
 following `click(x=, y=)`).
