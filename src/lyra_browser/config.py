@@ -441,6 +441,11 @@ class Config:
     # Captures larger than this on their long edge are downscaled (``0``: never), and
     # report the ``scale`` that maps their pixels back to CSS pixels (marks.py).
     capture_max_edge: int = 1568
+    # A screenshot first waits, at most this long, for the page to stop changing
+    # (evidence.wait_stable). ``0``: capture at once.
+    capture_settle_ms: int = 1000
+    # Action replies carry ``visual_change`` from before/after thumbnails (evidence.py).
+    evidence: bool = True
 
     # Where downloads land — derived like capture_dir, see _default_download_dir.
     download_dir: Path = field(init=False)
@@ -718,6 +723,11 @@ class Config:
                 _env("LYRA_BROWSER_CAPTURE_MAX_EDGE"),
                 default=cls.__dataclass_fields__["capture_max_edge"].default,
             ),
+            capture_settle_ms=_as_int(
+                _env("LYRA_BROWSER_CAPTURE_SETTLE_MS"),
+                default=cls.__dataclass_fields__["capture_settle_ms"].default,
+            ),
+            evidence=_as_optional_bool(_env("LYRA_BROWSER_EVIDENCE")) is not False,
             capture_keep=_as_int(
                 _env("LYRA_BROWSER_CAPTURE_KEEP"),
                 default=cls.__dataclass_fields__["capture_keep"].default,
