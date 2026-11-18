@@ -1,0 +1,947 @@
+{
+  "date": "2026-11-18",
+  "lyra_commit": "e0d1e4a30272",
+  "chrome_version": "Google Chrome 157.0.8103.38",
+  "brain": "claude-code",
+  "model": "haiku",
+  "model_reported": "haiku",
+  "repeats": 5,
+  "step_budget": 25,
+  "tasks": [
+    "tiny_find",
+    "tall_bar",
+    "far_target",
+    "hover_tip",
+    "regression",
+    "overlap",
+    "faint_text",
+    "misaligned"
+  ],
+  "suite": "v2",
+  "goals": {
+    "tiny_find": "The page names a code at the top. Click the small tile that is labelled with that code.",
+    "tall_bar": "Click the tallest bar in the chart. Two bars are almost the same height.",
+    "far_target": "Click the purple hexagon on this page.",
+    "hover_tip": "Each round button shows a label while the pointer is over it. Click the button labelled 'Archive'.",
+    "regression": "Press 'Deploy'. Afterwards one tile looks slightly different than before: press 'This one' on that tile.",
+    "overlap": "On one card, part of the text is hidden behind something. Press 'Report' on that card.",
+    "faint_text": "On one card the text has much less contrast against its background than on the others. Press 'Report' on that card.",
+    "misaligned": "One box in the grid sits a few pixels out of line with the others. Click it."
+  },
+  "episodes": [
+    {
+      "task": "tiny_find",
+      "repeat": 0,
+      "success": true,
+      "steps": 17,
+      "seconds": 41.3,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 3,
+        "screenshot": 8,
+        "click": 2,
+        "report_finding": 2,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 4,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "tall_bar",
+      "repeat": 0,
+      "success": true,
+      "steps": 17,
+      "seconds": 31.2,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 4,
+        "screenshot": 6,
+        "click": 2,
+        "wait_for": 1,
+        "report_finding": 1,
+        "finish": 2
+      },
+      "seeing": {
+        "region": 3,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "far_target",
+      "repeat": 0,
+      "success": true,
+      "steps": 9,
+      "seconds": 19.5,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "screenshot": 1,
+        "read_page": 2,
+        "scroll": 2,
+        "click": 1,
+        "report_finding": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "hover_tip",
+      "repeat": 0,
+      "success": true,
+      "steps": 15,
+      "seconds": 36.5,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 1,
+        "hover": 6,
+        "click": 1,
+        "report_finding": 2,
+        "finish": 2
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "regression",
+      "repeat": 0,
+      "success": true,
+      "steps": 9,
+      "seconds": 21.3,
+      "exit": "reached_goal",
+      "tools": {
+        "navigate": 1,
+        "read_page": 1,
+        "click": 2,
+        "screenshot": 3,
+        "note": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 3,
+        "name": 2,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "overlap",
+      "repeat": 0,
+      "success": false,
+      "steps": 11,
+      "seconds": 20.2,
+      "exit": "blocked",
+      "tools": {
+        "navigate": 1,
+        "read_page": 3,
+        "screenshot": 3,
+        "note": 1,
+        "report_finding": 1,
+        "click": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 2,
+        "name": 1,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "faint_text",
+      "repeat": 0,
+      "success": true,
+      "steps": 6,
+      "seconds": 13.2,
+      "exit": "reached_goal",
+      "tools": {
+        "navigate": 1,
+        "read_page": 1,
+        "screenshot": 1,
+        "note": 1,
+        "click": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "misaligned",
+      "repeat": 0,
+      "success": true,
+      "steps": 8,
+      "seconds": 17.5,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 1,
+        "click": 1,
+        "note": 1,
+        "report_finding": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "tiny_find",
+      "repeat": 1,
+      "success": false,
+      "steps": 28,
+      "seconds": 57.2,
+      "exit": "blocked",
+      "tools": {
+        "navigate": 1,
+        "read_page": 3,
+        "screenshot": 18,
+        "press_key": 3,
+        "report_finding": 1,
+        "finish": 2
+      },
+      "seeing": {
+        "region": 12,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "tall_bar",
+      "repeat": 1,
+      "success": true,
+      "steps": 17,
+      "seconds": 36.3,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 3,
+        "screenshot": 7,
+        "note": 1,
+        "click": 3,
+        "report_finding": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 4,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "far_target",
+      "repeat": 1,
+      "success": true,
+      "steps": 12,
+      "seconds": 21.8,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "screenshot": 3,
+        "read_page": 3,
+        "scroll": 2,
+        "click": 1,
+        "report_finding": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 1,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "hover_tip",
+      "repeat": 1,
+      "success": true,
+      "steps": 25,
+      "seconds": 42.7,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 4,
+        "screenshot": 6,
+        "hover": 10,
+        "click": 1,
+        "report_finding": 2,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 5,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "regression",
+      "repeat": 1,
+      "success": false,
+      "steps": 7,
+      "seconds": 14.4,
+      "exit": "blocked",
+      "tools": {
+        "navigate": 1,
+        "read_page": 1,
+        "screenshot": 1,
+        "click": 1,
+        "note": 1,
+        "report_finding": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 1,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "overlap",
+      "repeat": 1,
+      "success": false,
+      "steps": 10,
+      "seconds": 19.1,
+      "exit": "blocked",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 3,
+        "note": 1,
+        "click": 1,
+        "report_finding": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 2,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "faint_text",
+      "repeat": 1,
+      "success": true,
+      "steps": 5,
+      "seconds": 12.0,
+      "exit": "reached_goal",
+      "tools": {
+        "navigate": 1,
+        "read_page": 1,
+        "screenshot": 1,
+        "click": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "misaligned",
+      "repeat": 1,
+      "success": true,
+      "steps": 6,
+      "seconds": 14.0,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 1,
+        "click": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "tiny_find",
+      "repeat": 2,
+      "success": true,
+      "steps": 28,
+      "seconds": 49.5,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 3,
+        "screenshot": 19,
+        "click": 2,
+        "report_finding": 1,
+        "finish": 2
+      },
+      "seeing": {
+        "region": 15,
+        "name": 2,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "tall_bar",
+      "repeat": 2,
+      "success": true,
+      "steps": 25,
+      "seconds": 37.0,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 3,
+        "screenshot": 16,
+        "wait_for": 2,
+        "click": 1,
+        "report_finding": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 11,
+        "name": 3,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "far_target",
+      "repeat": 2,
+      "success": true,
+      "steps": 12,
+      "seconds": 20.5,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 3,
+        "screenshot": 3,
+        "scroll": 2,
+        "click": 1,
+        "report_finding": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "hover_tip",
+      "repeat": 2,
+      "success": true,
+      "steps": 16,
+      "seconds": 33.4,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 3,
+        "screenshot": 1,
+        "hover": 6,
+        "click": 1,
+        "wait_for": 1,
+        "report_finding": 2,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "regression",
+      "repeat": 2,
+      "success": true,
+      "steps": 6,
+      "seconds": 17.5,
+      "exit": "reached_goal",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "click": 2,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "overlap",
+      "repeat": 2,
+      "success": true,
+      "steps": 8,
+      "seconds": 18.5,
+      "exit": "reached_goal",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 2,
+        "report_finding": 1,
+        "click": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 1,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "faint_text",
+      "repeat": 2,
+      "success": true,
+      "steps": 5,
+      "seconds": 12.0,
+      "exit": "reached_goal",
+      "tools": {
+        "navigate": 1,
+        "read_page": 1,
+        "screenshot": 1,
+        "click": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "misaligned",
+      "repeat": 2,
+      "success": true,
+      "steps": 9,
+      "seconds": 24.9,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 2,
+        "click": 2,
+        "finish": 2
+      },
+      "seeing": {
+        "region": 1,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "tiny_find",
+      "repeat": 3,
+      "success": true,
+      "steps": 15,
+      "seconds": 37.6,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 3,
+        "screenshot": 5,
+        "click": 2,
+        "report_finding": 2,
+        "finish": 2
+      },
+      "seeing": {
+        "region": 3,
+        "name": 1,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "tall_bar",
+      "repeat": 3,
+      "success": true,
+      "steps": 15,
+      "seconds": 29.6,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 8,
+        "click": 1,
+        "report_finding": 1,
+        "finish": 2
+      },
+      "seeing": {
+        "region": 5,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "far_target",
+      "repeat": 3,
+      "success": true,
+      "steps": 11,
+      "seconds": 21.6,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "screenshot": 1,
+        "read_page": 2,
+        "note": 2,
+        "scroll": 2,
+        "click": 1,
+        "report_finding": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "hover_tip",
+      "repeat": 3,
+      "success": true,
+      "steps": 16,
+      "seconds": 35.0,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 1,
+        "hover": 6,
+        "click": 1,
+        "wait_for": 1,
+        "report_finding": 2,
+        "finish": 2
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "regression",
+      "repeat": 3,
+      "success": true,
+      "steps": 12,
+      "seconds": 24.7,
+      "exit": "reached_goal",
+      "tools": {
+        "navigate": 1,
+        "read_page": 3,
+        "screenshot": 3,
+        "click": 2,
+        "note": 1,
+        "finish": 2
+      },
+      "seeing": {
+        "region": 2,
+        "name": 1,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "overlap",
+      "repeat": 3,
+      "success": false,
+      "steps": 8,
+      "seconds": 17.7,
+      "exit": "blocked",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 2,
+        "report_finding": 1,
+        "click": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 1,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "faint_text",
+      "repeat": 3,
+      "success": true,
+      "steps": 5,
+      "seconds": 13.0,
+      "exit": "reached_goal",
+      "tools": {
+        "navigate": 1,
+        "screenshot": 1,
+        "read_page": 1,
+        "click": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "misaligned",
+      "repeat": 3,
+      "success": true,
+      "steps": 8,
+      "seconds": 16.4,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 3,
+        "screenshot": 1,
+        "click": 1,
+        "report_finding": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "tiny_find",
+      "repeat": 4,
+      "success": false,
+      "steps": 19,
+      "seconds": 45.1,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 9,
+        "note": 1,
+        "click": 1,
+        "read_image": 1,
+        "report_finding": 2,
+        "finish": 2
+      },
+      "seeing": {
+        "region": 6,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "tall_bar",
+      "repeat": 4,
+      "success": true,
+      "steps": 14,
+      "seconds": 24.4,
+      "exit": "reached_goal",
+      "tools": {
+        "navigate": 1,
+        "read_page": 3,
+        "screenshot": 5,
+        "click": 2,
+        "report_finding": 1,
+        "note": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 2,
+        "name": 1,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "far_target",
+      "repeat": 4,
+      "success": true,
+      "steps": 13,
+      "seconds": 19.4,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 3,
+        "note": 1,
+        "scroll": 2,
+        "click": 1,
+        "wait_for": 1,
+        "report_finding": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "hover_tip",
+      "repeat": 4,
+      "success": true,
+      "steps": 8,
+      "seconds": 16.2,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 1,
+        "hover": 1,
+        "click": 1,
+        "report_finding": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "regression",
+      "repeat": 4,
+      "success": true,
+      "steps": 7,
+      "seconds": 13.3,
+      "exit": "reached_goal",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "click": 2,
+        "note": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "overlap",
+      "repeat": 4,
+      "success": false,
+      "steps": 9,
+      "seconds": 15.3,
+      "exit": "blocked",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 2,
+        "report_finding": 1,
+        "note": 1,
+        "click": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 1,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 0
+      }
+    },
+    {
+      "task": "faint_text",
+      "repeat": 4,
+      "success": false,
+      "steps": 6,
+      "seconds": 12.4,
+      "exit": "blocked",
+      "tools": {
+        "navigate": 1,
+        "read_page": 1,
+        "screenshot": 1,
+        "click": 1,
+        "note": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    },
+    {
+      "task": "misaligned",
+      "repeat": 4,
+      "success": true,
+      "steps": 6,
+      "seconds": 11.5,
+      "exit": "partial",
+      "tools": {
+        "navigate": 1,
+        "read_page": 2,
+        "screenshot": 1,
+        "click": 1,
+        "finish": 1
+      },
+      "seeing": {
+        "region": 0,
+        "name": 0,
+        "compare_to": 0,
+        "annotate": 1
+      }
+    }
+  ],
+  "tool_use": {
+    "region": 19,
+    "name": 9,
+    "compare_to": 0,
+    "annotate": 15
+  },
+  "success_rate": 0.8,
+  "per_task": {
+    "tiny_find": 0.6,
+    "tall_bar": 1.0,
+    "far_target": 1.0,
+    "hover_tip": 1.0,
+    "regression": 0.8,
+    "overlap": 0.2,
+    "faint_text": 0.8,
+    "misaligned": 1.0
+  }
+}

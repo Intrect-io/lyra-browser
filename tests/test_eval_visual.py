@@ -165,3 +165,49 @@ def test_v2_page_does_not_carry_the_answer_as_text(task):
         words = [w for w in words if w not in ("hexagon", "purple")]
     for word in words:
         assert word not in html, (task, word)
+
+
+# ---- tool use per episode ---------------------------------------------------------------
+
+
+def _eval_visual():
+    import importlib
+
+    return importlib.import_module("eval_visual")
+
+
+def test_tool_use_counts_a_recorded_trace():
+    """A Haiku episode of tiny_find (2026-11-18), trimmed to tool and seeing arguments."""
+    path = Path(__file__).parent / "fixtures" / "eval_trace_tiny_find.json"
+    trace = json.loads(path.read_text())
+    tools, seeing = _eval_visual().tool_use(trace)
+    assert tools["screenshot"] == 6 and tools["click"] == 2 and tools["navigate"] == 1
+    assert seeing == {"region": 3, "name": 0, "compare_to": 0, "annotate": 0}
+
+
+def test_tool_use_reads_step_objects_and_skips_blank_ones():
+    from types import SimpleNamespace as Step
+
+    trace = [
+        Step(tool="screenshot", args={"name": "before"}),
+        Step(tool="click", args=None),
+        Step(tool="screenshot", args={"compare_to": "before", "annotate": False}),
+        Step(tool="", args={}),
+    ]
+    tools, seeing = _eval_visual().tool_use(trace)
+    assert tools == {"screenshot": 2, "click": 1}
+    assert seeing == {"region": 0, "name": 1, "compare_to": 1, "annotate": 0}
+
+
+def test_the_summary_counts_episodes_not_calls():
+    episodes = [
+        {"seeing": {"region": 3, "name": 0, "compare_to": 0, "annotate": 1}},
+        {"seeing": {"region": 1, "name": 1, "compare_to": 0, "annotate": 0}},
+        {},
+    ]
+    assert _eval_visual().tool_use_summary(episodes) == {
+        "region": 2,
+        "name": 1,
+        "compare_to": 0,
+        "annotate": 1,
+    }

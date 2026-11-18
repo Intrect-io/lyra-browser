@@ -245,6 +245,36 @@ def _leaks(task: str, sol: dict, text: str) -> str:
 
 # ---- model mode: the measurement --------------------------------------------------------
 
+SEEING = ("region", "name", "compare_to", "annotate")
+
+
+def tool_use(trace) -> tuple[dict[str, int], dict[str, int]]:
+    """(calls per tool, screenshots per seeing option) of one episode's trace.
+
+    ``trace`` is the server-kept one (``report.trace`` steps, or their dicts from
+    ``trace.jsonl``), so it counts what reached lyra, not what the brain says it did.
+    """
+    tools: dict[str, int] = {}
+    seeing = dict.fromkeys(SEEING, 0)
+    for step in trace:
+        tool = step.get("tool") if isinstance(step, dict) else getattr(step, "tool", None)
+        args = (step.get("args") if isinstance(step, dict) else getattr(step, "args", None)) or {}
+        if not tool:
+            continue
+        tools[tool] = tools.get(tool, 0) + 1
+        if tool == "screenshot":
+            for option in SEEING:
+                if args.get(option):
+                    seeing[option] += 1
+    return tools, seeing
+
+
+def tool_use_summary(episodes: list[dict]) -> dict[str, int]:
+    """How many episodes used each seeing option at least once."""
+    return {
+        option: sum(1 for e in episodes if e.get("seeing", {}).get(option)) for option in SEEING
+    }
+
 
 def _chrome_version() -> str:
     for name in ("google-chrome", "google-chrome-stable", "chromium"):
@@ -310,6 +340,7 @@ async def measure(args: argparse.Namespace) -> int:
                     "seconds": seconds,
                     "exit": report.outcome.status,
                 }
+                episode["tools"], episode["seeing"] = tool_use(report.trace)
                 if report.brain.error:
                     episode["error"] = report.brain.error[:200]
                 episodes.append(episode)
@@ -333,6 +364,7 @@ async def measure(args: argparse.Namespace) -> int:
         "suite": args.suite,
         "goals": {t: ALL_GOALS[t] for t in tasks},
         "episodes": episodes,
+        "tool_use": tool_use_summary(episodes),
         "success_rate": round(rate, 4),
         "per_task": {
             t: sum(e["success"] for e in episodes if e["task"] == t)

@@ -1,0 +1,117 @@
+[
+ {
+  "n": 1,
+  "tool": "navigate",
+  "args": {}
+ },
+ {
+  "n": 2,
+  "tool": "read_page",
+  "args": {
+   "mode": "text"
+  }
+ },
+ {
+  "n": 3,
+  "tool": "screenshot",
+  "args": {}
+ },
+ {
+  "n": 4,
+  "tool": "read_page",
+  "args": {
+   "mode": "tree"
+  }
+ },
+ {
+  "n": 5,
+  "tool": "screenshot",
+  "args": {
+   "region": [
+    24,
+    150,
+    906,
+    580
+   ]
+  }
+ },
+ {
+  "n": 6,
+  "tool": "screenshot",
+  "args": {
+   "region": [
+    355,
+    370,
+    240,
+    130
+   ]
+  }
+ },
+ {
+  "n": 7,
+  "tool": "screenshot",
+  "args": {
+   "region": [
+    360,
+    443,
+    95,
+    56
+   ]
+  }
+ },
+ {
+  "n": 8,
+  "tool": "click",
+  "args": {
+   "x": 407,
+   "y": 471
+  }
+ },
+ {
+  "n": 9,
+  "tool": "screenshot",
+  "args": {}
+ },
+ {
+  "n": 10,
+  "tool": "screenshot",
+  "args": {}
+ },
+ {
+  "n": 11,
+  "tool": "click",
+  "args": {
+   "x": 407,
+   "y": 471
+  }
+ },
+ {
+  "n": 12,
+  "tool": "read_page",
+  "args": {
+   "mode": "text"
+  }
+ },
+ {
+  "n": 13,
+  "tool": "read_image",
+  "args": {
+   "selector": "canvas"
+  }
+ },
+ {
+  "n": 14,
+  "tool": "report_finding",
+  "args": {}
+ },
+ {
+  "n": 15,
+  "tool": "report_finding",
+  "args": {}
+ },
+ {
+  "n": 16,
+  "tool": "finish",
+  "args": {}
+ }
+]
