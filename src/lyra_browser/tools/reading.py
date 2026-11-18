@@ -18,15 +18,18 @@ the client attaches the image to the model's next turn. Base64 is opt-in.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import inspect
 import json
 import re
+import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from fastmcp import FastMCP
 
-from .. import cursor, evidence, marks
+from .. import compare, cursor, evidence, marks
 from ..capture import envelope, save_capture, take
 from ..challenge import hint_for, observe
 from ..context import ServerContext, acquire_page
@@ -469,6 +472,63 @@ async def capture_page(
     return result
 
 
+async def _snapshot_and_compare(ctx, page, result: dict, name: str, against: str, inline):
+    """Keep the capture in ``result`` as ``name`` and/or compare it with ``against``."""
+    png = Path(result["image_path"]).read_bytes()
+    geo = marks.last(page)
+    scale = geo.scale if geo else result.get("scale", 1.0)
+    viewport = tuple(geo.viewport) if geo else (0.0, 0.0)
+    scroll = tuple(geo.scroll) if geo else (0.0, 0.0)
+    if against:
+        before = ctx.snapshots.get(against)
+        why = compare.mismatch(before, scale, viewport, scroll)
+        if why:
+            result["diff"] = {
+                "mismatch": why,
+                "compared_to": against,
+                "before": {
+                    "scale": before.scale,
+                    "viewport": before.viewport,
+                    "scroll": before.scroll,
+                },
+                "now": {"scale": round(scale, 4), "viewport": viewport, "scroll": scroll},
+                "hint": "Not compared pixel by pixel: restore the scroll position (or window "
+                "size) of the snapshot, or take a new one.",
+            }
+        else:
+            started = time.monotonic()
+            ratio, boxes = await asyncio.to_thread(compare.diff, before.png, png)
+            outlined = await asyncio.to_thread(compare.outline, png, boxes, scale) if boxes else png
+            path = save_capture(ctx.config, outlined, kind="compare")
+            kept = {k: result[k] for k in ("scale", "viewport") if k in result}
+            result = envelope(path, outlined, url=page.url, inline=inline) | kept
+            result["diff"] = {
+                "changed": bool(boxes),
+                "ratio": round(ratio, 5),
+                "boxes": compare.describe(boxes, scale),
+                "compared_to": against,
+                "url_changed": before.url != page.url,
+                "ms": round((time.monotonic() - started) * 1000),
+            }
+        ctx.audit.record("screenshot", {"compare_to": against, "diff": result["diff"]})
+    if name:
+        dropped = ctx.snapshots.put(
+            compare.Snapshot(
+                name=name,
+                png=png,
+                scale=scale,
+                viewport=viewport,
+                scroll=scroll,
+                url=page.url,
+                taken_at=time.monotonic(),
+            )
+        )
+        result["saved_as"] = name
+        if dropped:
+            result["dropped_snapshots"] = dropped
+    return result
+
+
 # How far a zoomed region is magnified at most (image px per CSS px). Chrome renders the
 # region again at that scale (Page.captureScreenshot clip.scale), so text gains real detail
 # rather than being upsampled.
@@ -762,6 +822,8 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         full_page: bool = False,
         inline: bool = False,
         annotate: bool = False,
+        name: str = "",
+        compare_to: str = "",
         region: list[float] | None = None,
     ) -> dict:
         """Capture the page as a PNG file and return its path.
@@ -786,20 +848,47 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         again up to 4x larger (small text, a dense chart, a few-pixel fault). Its own
         ``scale`` and ``origin`` come back, and click/hover x, y then mean pixels of
         this zoomed image.
+
+        ``name="before"`` keeps this capture under that name; ``compare_to="before"``
+        captures again and answers ``diff``: ``changed``, ``ratio`` (share of pixels) and
+        ``boxes`` around what changed, outlined on the attached image. For checking a
+        change: capture, make the change (or reload), compare. Both are taken without
+        lyra's cursor; a different scroll, viewport or scale answers ``mismatch``.
         """
         page, err = await acquire_page(ctx, claim=False)
         if err:
             return err
         if region is not None:
+            if name or compare_to:
+                return {"status": "error", "reason": "region does not go with name/compare_to."}
             return await capture_region(ctx, page, region, inline=inline)
+        if (name or compare_to) and (full_page or annotate):
+            return {
+                "status": "error",
+                "reason": "name and compare_to take the viewport as it is: no full_page or "
+                "annotate with them.",
+            }
+        if compare_to and ctx.snapshots.get(compare_to) is None:
+            return {
+                "status": "not_found",
+                "compare_to": compare_to,
+                "snapshots": ctx.snapshots.names(),
+                "hint": "Take screenshot(name=...) first; snapshots are dropped when the "
+                "browser closes.",
+            }
         settled = None
         if ctx.config.capture_settle_ms > 0:
             settled = await evidence.wait_stable(
                 page, timeout_s=ctx.config.capture_settle_ms / 1000
             )
-        result = await capture_page(
-            ctx, page, full_page=full_page, annotate=annotate, inline=inline, tool="screenshot"
-        )
+        if name or compare_to:
+            async with cursor.out_of_frame(ctx, page):
+                result = await capture_page(ctx, page, inline=inline, tool="screenshot")
+            result = await _snapshot_and_compare(ctx, page, result, name, compare_to, inline)
+        else:
+            result = await capture_page(
+                ctx, page, full_page=full_page, annotate=annotate, inline=inline, tool="screenshot"
+            )
         if settled is not None and settled.get("stable") is False:
             result["settled"] = False
             result["note"] = (

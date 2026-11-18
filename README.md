@@ -541,6 +541,28 @@ settled within the wait, a never-ending animation answered `timeout` within 1.6 
 budget. Median time evidence added to a click, N=20 clicks per arm taken in alternation
 (cursor off in both arms): 79–81 ms over four runs (native headless and headful).
 
+### Before and after: `screenshot(name=...)`, `screenshot(compare_to=...)`
+
+`visual_change` compares around one action. To check a change across a reload, a rebuild
+or a fix made elsewhere, keep a capture under a name and compare a later one with it:
+`screenshot(name="before")`, make the change, `screenshot(compare_to="before")`. The reply's
+`diff` holds `changed`, `ratio` (the share of pixels that changed), `boxes` around the
+changed regions (`box_px` in the image, `box_css` in the viewport, largest first, at most
+20) and `url_changed`; the attached image is the new capture with each box outlined. An
+element that moved is one box, not one per edge. Both captures are taken with lyra's cursor
+off the screen, so its moving is not a change. Two captures at a different scroll position,
+viewport size or scale are not compared pixel by pixel: `diff` says `mismatch` and which.
+Snapshots are kept in memory only (8 at most and 48 MiB, oldest dropped) and are dropped
+when the browser closes or another session takes it.
+
+Measured 2026-11-19 with Chrome 157.0.8103.38 (`scripts/verify_compare_e2e.py`, native and
+Playwright 1.65.2, headless and headful under Xvfb): a reload of an unchanged page compares
+as `changed: false`, ratio 0; one tile of twelve moved by 3 CSS px, and one recoloured from
+`#e5e7eb` to `#d4d8de`, each gives exactly one box on that tile (IoU >= 0.5); the cursor
+moving between the captures gives no box; a scroll and a viewport change answer
+`mismatch`. `screenshot(compare_to=...)` took 283–300 ms at the median over N=20 per run,
+of which the pixel diff 19–25 ms.
+
 ### The virtual cursor
 
 Before `click`, `hover`, `type_text` and `select_option` act, a cursor travels from where

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from .approval import CollaborationState
 from .audit import AuditLog
+from .compare import Snapshots
 from .config import Config
 from .consent import ConsentBroker
 from .devtools import DevtoolsRecorder
@@ -42,6 +43,8 @@ class ServerContext:
     """Judges every file a tab is offered, and saves the ones asked for. See downloads.py."""
     devtools: DevtoolsRecorder | None = None
     """The console and network log every tab feeds. See devtools.py."""
+    snapshots: Snapshots | None = None
+    """Named captures for screenshot(compare_to=...). See compare.py."""
 
     def __post_init__(self) -> None:
         if self.perms is None:
@@ -64,6 +67,8 @@ class ServerContext:
             )
         if self.devtools is None:
             self.devtools = DevtoolsRecorder()
+        if self.snapshots is None:
+            self.snapshots = Snapshots()
         # The session puts this on every tab it adopts.
         self.session.download_handler = self.downloads.on_download
         # Called for every tab the session adopts, like a UAT run's observers. A test
@@ -121,6 +126,9 @@ async def _release_ownership(ctx: ServerContext, *, close: bool) -> None:
     ctx.perms.revoke_all()
     # A step the outgoing holder asked the user to do is not the incoming one's to inherit.
     ctx.collab.end_user_turn()
+    # Captures of the outgoing holder's pages are theirs, like the grants.
+    if ctx.snapshots is not None:
+        ctx.snapshots.clear()
     if close:
         await ctx.session.stop()
     ctx.owner_session = None
