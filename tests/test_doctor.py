@@ -36,13 +36,14 @@ def installed(*names: str):
     return lambda name: name in names
 
 
-def run(config: Config, *, found=None, packages=(), display=True, held=False) -> dict:
+def run(config: Config, *, found=None, packages=(), display=True, held=False, profiles=()) -> dict:
     return doctor.diagnose(
         config,
         find=finder(found if found is not None else {"chrome": "/opt/chrome"}),
         installed=installed(*packages),
         has_display=lambda: display,
         lock_held=lambda _path: held,
+        profiles=lambda: list(profiles),
     )
 
 
@@ -212,3 +213,20 @@ def test_a_configured_display_that_is_down_is_a_warning(tmp_path, monkeypatch):
     report = run(make_config(tmp_path, headless=False, display=":98"), display=False)
     assert report["ok"] is False
     assert any("not up" in p["what"] for p in report["problems"])
+
+
+def test_importable_profiles_are_listed_without_the_account(tmp_path):
+    from lyra_browser.profile_import import SourceProfile
+
+    found = [SourceProfile("chrome", tmp_path, "Profile 2", name="Work", account="a@b.test")]
+    report = run(make_config(tmp_path), profiles=found)
+    assert report["importable_profiles"] == [
+        {"browser": "chrome", "directory": "Profile 2", "name": "Work"}
+    ]
+    text = doctor.render(report)
+    assert "chrome 'Profile 2' (Work)" in text
+    assert "a@b.test" not in text and "a@b.test" not in json.dumps(report)
+
+
+def test_no_importable_profile_is_said_plainly(tmp_path):
+    assert "no browser profiles found" in doctor.render(run(make_config(tmp_path)))

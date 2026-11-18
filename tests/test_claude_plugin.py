@@ -147,7 +147,7 @@ def test_scripts_refuse_to_run_outside_claude_code(script, tmp_path):
     assert "CLAUDE_PLUGIN_DATA" in result.stderr
 
 
-@pytest.mark.parametrize("skill", ["browser", "install-browser", "doctor"])
+@pytest.mark.parametrize("skill", ["browser", "install-browser", "doctor", "import-profile"])
 def test_each_skill_has_frontmatter_claude_code_reads(skill):
     text = (SKILLS / skill / "SKILL.md").read_text(encoding="utf-8")
     assert text.startswith("---\n"), "frontmatter must open on the first line"

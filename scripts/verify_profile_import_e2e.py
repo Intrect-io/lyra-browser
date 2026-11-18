@@ -24,6 +24,17 @@ Each case asserts what the page saw, not only what the import reported:
 4. lyra stores its own cookie again, the source logs in afresh, and a re-import
    limited to ``--sites 127.0.0.1`` brings the new cookie and keeps lyra's own;
 5. the source profile's files were not modified by either import.
+
+Then, once (the v10 source), through a real MCP client whose elicitation handler
+plays the user, with discovery pointed at the scratch source only:
+
+- first_run_prompt: the first ``open_browser`` on an empty lyra profile asks which
+  profile to import (offered: exactly the scratch one; not an "Allow ..." prompt).
+  Skip imports nothing and is not asked again; choosing the profile imports it before
+  the launch, and the page is sent its cookie and reads its storage; under the
+  ``autonomous`` channel nothing is asked and nothing imported;
+- sync_on_open: with ``profile_sync`` on, an unchanged source is left alone, a new
+  login in the source reaches the page at the next open; with it off it does not.
 """
 
 from __future__ import annotations
@@ -222,6 +233,146 @@ async def run_case(name: str, base: str, alt: str, *, keyring: bool, headless: b
         tmp.cleanup()
 
 
+def _driver_fields() -> dict:
+    wanted = os.environ.get("LYRA_BROWSER_DRIVER", "")
+    return {"driver": wanted} if wanted in ("native", "playwright", "patchright") else {}
+
+
+class User:
+    """The person behind the client: answers lyra's prompts, records what was asked."""
+
+    def __init__(self, choice: str) -> None:
+        self.choice = choice
+        self.profile_prompts: list[dict] = []
+
+    async def __call__(self, message, _response_type, params, _context):
+        from fastmcp.client.elicitation import ElicitResult
+
+        if message.startswith("Allow "):
+            return ElicitResult(action="accept", content={"value": "approve"})
+        self.profile_prompts.append({"message": message, "schema": params.requestedSchema})
+        return ElicitResult(action="accept", content={"value": self.choice})
+
+
+async def client_open(data_dir: Path, user: User, *urls: str, headless: bool, **fields):
+    """open_browser (and navigate to ``urls``) through a real MCP client; returns
+    (open_browser's reply, the last page's text)."""
+    from fastmcp import Client, FastMCP
+
+    from lyra_browser.approval import CollaborationState
+    from lyra_browser.audit import AuditLog
+    from lyra_browser.config import Config
+    from lyra_browser.context import ServerContext
+    from lyra_browser.session import BrowserSession
+    from lyra_browser.tools import register_all
+
+    cfg = Config(
+        client="generic",
+        data_dir=data_dir,
+        headless=headless,
+        consent_timeout_s=30.0,
+        **_driver_fields(),
+        **fields,
+    )
+    cfg.capture_dir = data_dir / "captures"
+    ctx = ServerContext(
+        config=cfg,
+        session=BrowserSession(cfg),
+        audit=AuditLog(cfg.audit_path),
+        collab=CollaborationState(require_approval=cfg.require_approval),
+    )
+    mcp = FastMCP("profile-onboard-e2e")
+    register_all(mcp, ctx)
+    text = ""
+    try:
+        async with Client(mcp, elicitation_handler=user) as client:
+            opened = (await client.call_tool("open_browser", {})).structured_content
+            expect(opened.get("status") == "ok", "lyra launches", opened)
+            if "driver" in _driver_fields():
+                ran = ctx.session.active_driver
+                expect(ran == cfg.driver, f"lyra runs on the {cfg.driver} driver", ran)
+            for url in urls:
+                moved = await client.call_tool("navigate", {"url": url, "reason": "e2e"})
+                moved = moved.structured_content
+                expect(moved.get("status") == "ok", f"lyra reaches {urlparse(url).path}", moved)
+            if urls and urls[-1].endswith("/check"):
+                page = await ctx.session.page()
+                await page.wait_for_function("document.title === 'checked'", timeout=10_000)
+            if urls:
+                text = (await client.call_tool("read_page", {})).structured_content.get("text", "")
+            await client.call_tool("close_browser", {})
+    finally:
+        await ctx.session.stop()
+    return opened, text
+
+
+async def run_onboarding(base: str, *, headless: bool) -> None:
+    from lyra_browser import profile_import
+
+    print(f"\n[first_run_prompt] {'headless' if headless else 'headful'}")
+    tmp = tempfile.TemporaryDirectory(prefix="lyra-onboard-", ignore_cleanup_errors=True)
+    root = Path(tmp.name)
+    source_dir = root / "source"
+    real_roots = profile_import.browser_roots
+    # Discovery sees the scratch source and nothing of this machine's own profiles.
+    profile_import.browser_roots = lambda: {"chrome": source_dir}
+    try:
+        await seed_source(source_dir, base, "first-1", keyring=False)
+        before = source_fingerprint(source_dir)
+
+        user = User("skip")
+        opened, text = await client_open(root / "skip", user, f"{base}/echo", headless=headless)
+        expect(len(user.profile_prompts) == 1, "an empty profile's first open asks", user)
+        field = user.profile_prompts[0]["schema"]["properties"]["value"]
+        expect(field["enum"] == ["skip", "chrome/Default"], "it offers the scratch profile", field)
+        expect(field.get("default") == "skip", "skip is the default", field)
+        expect(
+            not user.profile_prompts[0]["message"].startswith("Allow"),
+            "the question is not a permission prompt",
+            user.profile_prompts[0]["message"],
+        )
+        expect(opened.get("profile_import", {}).get("status") == "skipped", "skip", opened)
+        expect("who=" not in text, "skip imports nothing", text)
+        opened, _ = await client_open(root / "skip", user, headless=headless)
+        expect(len(user.profile_prompts) == 1, "an answered offer is not asked again", user)
+        expect("profile_import" not in opened, "and the reply says nothing of it", opened)
+
+        user = User("chrome/Default")
+        opened, text = await client_open(root / "take", user, f"{base}/check", headless=headless)
+        got = opened.get("profile_import") or {}
+        expect(got.get("status") == "imported", "choosing the profile imports it", opened)
+        expect(opened.get("imported_from", {}).get("profile") == "Default", "imported_from")
+        expect("who=first-1" in text, "the page is sent the imported cookie", text)
+        expect("LS[first-1]" in text, "and reads the imported storage", text)
+        expect(source_fingerprint(source_dir) == before, "the source profile is untouched")
+
+        user = User("chrome/Default")
+        opened, text = await client_open(
+            root / "auto", user, f"{base}/echo", headless=headless, consent_channel="autonomous"
+        )
+        expect(user.profile_prompts == [], "the autonomous channel never asks", user)
+        expect("profile_import" not in opened and "who=" not in text, "nor imports", text)
+
+        print(f"\n[sync_on_open] {'headless' if headless else 'headful'}")
+        take, user = root / "take", User("skip")
+        opened, _ = await client_open(take, user, headless=headless, profile_sync=True)
+        expect(opened.get("profile_sync") == {"status": "unchanged"}, "unchanged source", opened)
+        await seed_source(source_dir, base, "first-2", keyring=False)
+        opened, text = await client_open(
+            take, user, f"{base}/echo", headless=headless, profile_sync=True
+        )
+        expect(opened.get("profile_sync", {}).get("status") == "synced", "a change syncs", opened)
+        expect("who=first-2" in text, "the source's new login reaches the page", text)
+        await seed_source(source_dir, base, "first-3", keyring=False)
+        opened, text = await client_open(take, user, f"{base}/echo", headless=headless)
+        expect("profile_sync" not in opened, "with sync off nothing is compared", opened)
+        expect("who=first-2" in text, "and nothing is re-imported", text)
+        expect(user.profile_prompts == [], "an imported profile is never offered again", user)
+    finally:
+        profile_import.browser_roots = real_roots
+        tmp.cleanup()
+
+
 def start_private_keyring() -> subprocess.Popen | None:
     """Inside dbus-run-session: a throwaway, unlocked gnome-keyring on this bus."""
     proc = subprocess.Popen(
@@ -246,6 +397,7 @@ async def run(headless_only: bool) -> None:
         for headless in modes:
             await run_case("v10", base, alt, keyring=False, headless=headless)
             await run_case("v11", base, alt, keyring=True, headless=headless)
+            await run_onboarding(base, headless=headless)
     finally:
         server.shutdown()
 

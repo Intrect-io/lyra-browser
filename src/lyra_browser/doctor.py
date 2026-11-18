@@ -24,7 +24,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from . import __version__
+from . import __version__, profile_import
 from .config import CLIENTS, Config, _has_display, display_alive, display_number
 from .profile_import import PINNED_CHANNELS, pinned_candidates, read_sidecar
 
@@ -97,6 +97,7 @@ def diagnose(
     installed: Callable[[str], bool] | None = None,
     has_display: Callable[[], bool] | None = None,
     lock_held: Callable[[Path], bool | None] | None = None,
+    profiles: Callable[[], list] | None = None,
 ) -> dict[str, Any]:
     """The report, as a dict ready for JSON. The callables are seams for tests."""
     from .native.errors import Error as NativeError
@@ -107,6 +108,7 @@ def diagnose(
     installed = installed or default_installed
     has_display = has_display or _has_display
     lock_held = lock_held or _lock_held_by_other
+    profiles = profiles or profile_import.discover_profiles
     problems: list[dict[str, str]] = []
 
     def problem(level: str, what: str, fix: str) -> None:
@@ -217,6 +219,15 @@ def diagnose(
             "pinned_channel": pinned if pin_applies else None,
         }
 
+    # What `lyra-browser profile import` (or the first-run offer) could bring in. The
+    # account e-mail stays out: this report is also read by the model.
+    try:
+        importable = [
+            {"browser": p.browser, "directory": p.directory, "name": p.name} for p in profiles()
+        ]
+    except Exception:  # noqa: BLE001 — an unreadable Local State is not a launch problem
+        importable = []
+
     guard = "cdp" if driver == "native" else config.guard_backend
     return {
         "ok": not any(p["level"] == "error" for p in problems),
@@ -253,6 +264,8 @@ def diagnose(
             "watch": config.watch,
         },
         "imported_profile": imported,
+        "importable_profiles": importable,
+        "profile_sync": bool(getattr(config, "profile_sync", False)),
         "problems": problems,
     }
 
@@ -295,6 +308,19 @@ def render(report: dict[str, Any]) -> str:
             f"imported    {imp['browser']} profile {imp['profile']!r} at {imp['imported_at']}"
             f" ({imp['cookies_imported']} cookies)"
         )
+    importable = report.get("importable_profiles") or []
+    if importable:
+        lines.append(
+            "importable  "
+            + ", ".join(
+                f"{p['browser']} {p['directory']!r} ({p['name'] or '-'})" for p in importable
+            )
+            + "  (lyra-browser profile import --profile ...)"
+        )
+    else:
+        lines.append("importable  no browser profiles found on this machine")
+    if report.get("profile_sync"):
+        lines.append("sync        on: open_browser re-imports the profile when it changed")
     for p in report["problems"]:
         lines.append(f"{p['level'].upper():<8}{p['what']}\n        fix: {p['fix']}")
     lines.append("ok" if report["ok"] else "NOT ok: a launch would fail")
