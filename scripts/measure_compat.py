@@ -12,6 +12,15 @@ agent's own ``navigate``, then the same page-state heuristic as ``probe_document
 Cells:
   cdp            ``guard_backend="cdp"``: no route, swiftshader dropped (the new backend)
   route-master   ``guard_backend="route"`` with every launch default kept: what master ships
+  cursor-on      ``cdp``, then one ``hover`` at a screenshot point once settled; cursor on
+  cursor-off     the same visit and hover with ``cursor=False``
+
+The cursor switches the Overlay and DOM agents on only at the first pointer action, so a
+plain visit cannot show whether a site notices them: the cursor cells hover and then judge
+the page again (``after_hover``), and the row's verdict is that second look.
+
+    xvfb-run -a -s "-screen 0 1920x1080x24" .venv/bin/python scripts/measure_compat.py \\
+        --headful --cells cursor-on,cursor-off --sites etsy,hyatt --reps 5 --gap 12
 
 Visits are shuffled within each round and ``--gap`` seconds apart. A site that has been
 visited from one IP many times in an afternoon stops being a fair test (the probe's control
@@ -51,7 +60,7 @@ SITES = {
     "hyatt": "https://www.hyatt.com/",
     "tripadvisor": "https://www.tripadvisor.com/",
 }
-CELLS = ("cdp", "route-master")
+CELLS = ("cdp", "route-master", "cursor-on", "cursor-off")
 OUT = REPO / "testing" / "compat_out"
 
 
@@ -70,10 +79,21 @@ async def settle(page, seconds: float = 15.0) -> dict:
         await asyncio.sleep(2.5)
 
 
+def arm(cell: str) -> tuple[str, dict, bool]:
+    """A cell's guard backend, extra ``Config`` fields, and whether it hovers after settling."""
+    if cell == "cursor-on":
+        return "cdp", {"cursor": True, "consent_channel": "autonomous"}, True
+    if cell == "cursor-off":
+        return "cdp", {"cursor": False, "consent_channel": "autonomous"}, True
+    if cell in ("cdp", "route-master"):
+        return ("cdp" if cell == "cdp" else "route"), {}, False
+    raise KeyError(cell)
+
+
 async def visit(cell: str, site: str, *, headless: bool, driver: str) -> dict:
     from lyra_browser import session as session_mod
 
-    backend = "cdp" if cell == "cdp" else "route"
+    backend, overrides, hover = arm(cell)
     os.environ["LYRA_BROWSER_GUARD"] = backend
     original = session_mod.launch_kwargs
     if cell == "route-master":
@@ -90,7 +110,7 @@ async def visit(cell: str, site: str, *, headless: bool, driver: str) -> dict:
     tmp = tempfile.TemporaryDirectory(prefix="compat-", ignore_cleanup_errors=True)
     ctx = None
     try:
-        ctx, tools = await build_tools(Path(tmp.name), headless=headless)
+        ctx, tools = await build_tools(Path(tmp.name), headless=headless, **overrides)
         ctx.config.driver = driver
         opened = await tools["open_browser"]()
         row["driver"] = opened.get("driver")
@@ -108,6 +128,26 @@ async def visit(cell: str, site: str, *, headless: bool, driver: str) -> dict:
             flags=[k for k, v in state.get("m", {}).items() if v],
             error=state.get("error"),
         )
+        if hover:
+            row["first_verdict"] = row["verdict"]
+            # By point, not by selector: a page whose <body> is not "actionable" (hyatt's,
+            # 2026-11-19) would refuse the hover before the cursor moved at all.
+            shot = await tools["screenshot"]()
+            scale = shot.get("scale") or 1.0
+            vw, vh = shot.get("viewport") or (800, 600)
+            moved = await tools["hover"](x=vw * scale / 2, y=vh * scale / 3)
+            row["hover"] = moved.get("status")
+            await asyncio.sleep(3)
+            page = await ctx.session.page()
+            state = await settle(page, seconds=8.0)
+            row.update(
+                verdict=verdict(state),
+                status=state.get("status"),
+                title=state.get("title"),
+                final=state.get("url"),
+                flags=[k for k, v in state.get("m", {}).items() if v],
+                error=state.get("error"),
+            )
     except Exception as exc:  # noqa: BLE001 — a failed visit is a result, not a crash
         row.update(verdict="error", error=f"{type(exc).__name__}: {str(exc)[:160]}")
     finally:
@@ -163,7 +203,9 @@ def main() -> int:
     parser.add_argument("--reps", type=int, default=5)
     parser.add_argument("--gap", type=float, default=12.0, help="seconds between visits")
     parser.add_argument("--headful", action="store_true")
-    parser.add_argument("--driver", choices=["auto", "playwright", "patchright"], default="auto")
+    parser.add_argument(
+        "--driver", choices=["auto", "playwright", "patchright", "native"], default="auto"
+    )
     parser.add_argument(
         "--url",
         action="append",
