@@ -671,6 +671,36 @@ both runs: it pressed Deploy and finished without picking a tile (in the after r
 named a snapshot first, never compared with it). N=2 per task: this says which tasks a
 model gets wrong and whether it reached for the tools, not that zoom raises a success rate.
 
+#### Haiku at 5 repeats, before and after `region_px` and `compare_hint` (`haiku-r5-*.json`)
+
+The same v2 suite with Haiku, 5 repeats per task (40 episodes), every episode recording
+which seeing options its screenshots used (counted from the server-kept trace). Before:
+master `e0d1e4a` (zoom and compare already there); after: `b6fcb83`, whose action replies
+add `visual_change.region_px` and, with a snapshot held, `compare_hint`. Both measured
+2026-11-18, Chrome 157.0.8103.38, step budget 25.
+
+| | `haiku-r5-baseline.json` | `haiku-r5-after.json` |
+| --- | --- | --- |
+| success | **32/40** (0.800) | **32/40** (0.800) |
+| `tiny_find` | 3/5 | 5/5 |
+| `regression` | 4/5 | 5/5 |
+| `faint_text` | 4/5 | 1/5 |
+| `overlap` | 1/5 | 1/5 |
+| `tall_bar`, `far_target`, `hover_tip`, `misaligned` | 5/5 each | 5/5 each |
+| episodes that zoomed (`region`) | 19 | 13 |
+| episodes that named a snapshot (`name`) | 9 | 16 |
+| episodes that compared (`compare_to`) | **0** | **5** (3 of them `regression`) |
+| episodes with marks (`annotate`) | 15 | 21 |
+| mean steps, mean seconds per episode | 12.1, 24.6 s | 11.4, 20.3 s |
+
+What the change did: Haiku went from never comparing to comparing in 5 episodes, three of
+them on the task that is about a change (`regression`, now 5/5), and it finished episodes a
+little faster. What it did not do: raise the overall rate, which is the same 32/40. The
+`faint_text` drop (4/5 to 1/5) is not a tool effect in the traces: each miss is one
+screenshot and a click on the wrong card, as in the baseline's miss; N=5 per task leaves
+room for that much swing. `overlap` (text cut off by a box of the card's colour) stays the
+hardest task for Haiku either way.
+
 ## Permissions
 
 The agent declares what it intends; the browser is judged on what it actually
