@@ -26,7 +26,7 @@ import asyncio
 
 from fastmcp import FastMCP
 
-from .. import cursor, marks
+from .. import cursor, evidence, marks
 from ..approval import TakeoverActive
 from ..context import ServerContext, acquire_page
 from ..downloads import KEYBOARD_SETTLE_SCALE
@@ -313,6 +313,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         return done.result
 
     @mcp.tool
+    @evidence.around(ctx)
     async def click(
         selector: str = "",
         reason: str = "",
@@ -322,6 +323,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         download: bool = False,
         x: float | None = None,
         y: float | None = None,
+        capture: bool = False,
     ) -> dict:
         """Click the first element matching ``selector`` (CSS or Playwright text=).
 
@@ -367,6 +369,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         no element to name — a canvas, a map, a drawn button. The same permissions
         apply (declare ``submits``/``download`` as for a selector). A point that is
         not on screen any more answers ``outside_viewport``: take a new screenshot.
+
+        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px) says
+        whether the page visibly changed. ``capture=true`` also returns the image after
+        the action (``image_path``; its ``scale`` serves a later ``click(x, y)``).
         """
         if x is not None or y is not None:
             return await _pointer_at(
@@ -457,6 +463,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         return done.result
 
     @mcp.tool
+    @evidence.around(ctx)
     async def type_text(
         selector: str,
         value: str,
@@ -464,6 +471,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         reason: str = "",
         confirm: bool = False,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
+        capture: bool = False,
     ) -> dict:
         """Fill ``selector`` with ``value``. The value is redacted from the audit log.
 
@@ -479,6 +487,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
 
         A native dialog the page raised is answered at once and listed under
         ``dialogs`` in the reply.
+
+        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px) says
+        whether the page visibly changed. ``capture=true`` also returns the image after
+        the action (``image_path``; its ``scale`` serves a later ``click(x, y)``).
         """
         page, err = await acquire_page(ctx)
         if err:
@@ -540,12 +552,14 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         return done.result
 
     @mcp.tool
+    @evidence.around(ctx)
     async def press_key(
         key: str,
         reason: str = "",
         submits: bool = False,
         confirm: bool = False,
         download: bool = False,
+        capture: bool = False,
     ) -> dict:
         """Press a keyboard key (e.g. 'Enter', 'Escape', 'Control+a') on the page.
 
@@ -563,6 +577,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
 
         A native dialog the page raised is answered at once and listed under
         ``dialogs`` in the reply.
+
+        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px) says
+        whether the page visibly changed. ``capture=true`` also returns the image after
+        the action (``image_path``; its ``scale`` serves a later ``click(x, y)``).
         """
         page, err = await acquire_page(ctx)
         if err:
@@ -604,6 +622,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             return reply
 
     @mcp.tool
+    @evidence.around(ctx)
     async def hover(
         selector: str = "",
         reason: str = "",
@@ -611,6 +630,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
         x: float | None = None,
         y: float | None = None,
+        capture: bool = False,
     ) -> dict:
         """Move the pointer over the first element matching ``selector``.
 
@@ -627,6 +647,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         answered ``blocked_by_policy`` (see ``click``).
 
         ``x`` and ``y`` hover a point instead: pixels of the latest ``screenshot``.
+
+        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px) says
+        whether the page visibly changed. ``capture=true`` also returns the image after
+        the action (``image_path``; its ``scale`` serves a later ``click(x, y)``).
         """
         if x is not None or y is not None:
             return await _pointer_at(
@@ -706,6 +730,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         return done.result
 
     @mcp.tool
+    @evidence.around(ctx)
     async def scroll(
         to: str = "",
         by_y: int = 0,
@@ -713,6 +738,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         reason: str = "",
         confirm: bool = False,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
+        capture: bool = False,
     ) -> dict:
         """Scroll the page. Give exactly one of ``to``, ``by_y`` or ``selector``.
 
@@ -730,6 +756,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
 
         ``selector`` fails fast like ``click`` (``not_found``, ``hidden``,
         ``disabled``, ``timeout``, ``page_closed``).
+
+        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px) says
+        whether the page visibly changed. ``capture=true`` also returns the image after
+        the action (``image_path``; its ``scale`` serves a later ``click(x, y)``).
         """
         chosen = [
             name for name, given in (("to", to), ("by_y", by_y), ("selector", selector)) if given

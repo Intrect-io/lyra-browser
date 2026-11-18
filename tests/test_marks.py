@@ -27,12 +27,14 @@ def _png(w: int, h: int) -> bytes:
 def test_scale_is_measured_from_the_image_not_the_ratio_the_page_reports():
     png, scale = marks.process(_png(1280, 800), css_width=1280, dpr=2.0, max_edge=0)
     assert scale == 1.0
-    assert Image.open(io.BytesIO(png)).size == (1280, 800)
+    size = Image.open(io.BytesIO(png)).size
+    assert size == (1280, 800)
 
 
 def test_a_capture_over_the_max_edge_is_downscaled_and_says_by_how_much():
     png, scale = marks.process(_png(2560, 1600), css_width=1280, max_edge=1568)
-    assert Image.open(io.BytesIO(png)).size == (1568, 980)
+    size = Image.open(io.BytesIO(png)).size
+    assert size == (1568, 980)
     assert scale == pytest.approx(1568 / 1280)
 
 

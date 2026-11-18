@@ -19,6 +19,7 @@ import time
 
 from fastmcp import FastMCP
 
+from .. import evidence
 from ..context import ServerContext, acquire_page
 from ..origin import loggable_url
 
@@ -156,6 +157,24 @@ async def _wait(page, kind: str, value: str, state: str, timeout_ms: int) -> Non
 
 
 def register(mcp: FastMCP, ctx: ServerContext) -> None:
+    async def _visual_stable(conditions: dict, timeout_ms: int) -> dict:
+        if any(conditions.values()):
+            return {
+                "status": "error",
+                "reason": "visual_stable waits on its own: give no other condition.",
+            }
+        if timeout_ms <= 0:
+            return {"status": "error", "reason": "timeout_ms must be positive."}
+        page, err = await acquire_page(ctx, claim=False)
+        if err:
+            return err
+        waited = await evidence.wait_stable(page, timeout_s=min(timeout_ms, 30000) / 1000)
+        ctx.audit.record("wait_for", {"visual_stable": True, "timeout_ms": timeout_ms})
+        if waited.get("stable") is None:
+            return {"status": "error", "reason": "This page cannot be compared frame to frame."}
+        status = "ok" if waited["stable"] else "timeout"
+        return {"status": status, **waited}
+
     @mcp.tool
     async def wait_for(
         text: str = "",
@@ -164,6 +183,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         load_state: str = "",
         state: str = "visible",
         timeout_ms: int = 10000,
+        visual_stable: bool = False,
     ) -> dict:
         """Wait until the page is ready, instead of sleeping or clicking to pass time.
 
@@ -189,8 +209,14 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         page that renders 300ms after load looks empty to ``read_page`` until this
         returns. It only reads, so it needs no approval and works while the user
         has taken over.
+
+        ``visual_stable=true`` (alone) waits until the page stops changing on
+        screen — animations, late images, web fonts: two frames 150 ms apart are
+        the same. ``stable`` says whether it did within ``timeout_ms``.
         """
         conditions = {"text": text, "selector": selector, "url": url, "load_state": load_state}
+        if visual_stable:
+            return await _visual_stable(conditions, timeout_ms)
         kind, invalid = _problem(conditions, state, timeout_ms)
         if invalid is not None:
             return invalid

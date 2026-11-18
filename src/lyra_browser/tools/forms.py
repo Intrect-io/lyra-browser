@@ -37,7 +37,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
-from .. import cursor
+from .. import cursor, evidence
 from ..approval import TakeoverActive
 from ..context import ServerContext, acquire_page
 from ..permission import Capability
@@ -508,6 +508,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         return {"status": "ok", "url": page.url, **data}
 
     @mcp.tool
+    @evidence.around(ctx)
     async def select_option(
         selector: str,
         value: str = "",
@@ -516,6 +517,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         submits: bool = False,
         reason: str = "",
         confirm: bool = False,
+        capture: bool = False,
     ) -> dict:
         """Choose an option in a ``<select>``, by ``value``, ``label`` or ``index``.
 
@@ -523,6 +525,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         sets the value and fires ``change``, which is what a page listens for.
         Set ``submits=true`` when the choice sends the form (an ``onchange``
         that posts) — that asks for the permission it needs.
+
+        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px) says
+        whether the page visibly changed. ``capture=true`` also returns the image after
+        the action (``image_path``; its ``scale`` serves a later ``click(x, y)``).
         """
         chosen = [
             n

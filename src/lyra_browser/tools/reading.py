@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 from fastmcp import FastMCP
 
-from .. import cursor, marks
+from .. import cursor, evidence, marks
 from ..capture import envelope, save_capture, take
 from ..challenge import hint_for, observe
 from ..context import ServerContext, acquire_page
@@ -404,6 +404,70 @@ async def _viewport(page) -> tuple[float, float] | None:
         return None
 
 
+async def capture_page(
+    ctx,
+    page,
+    *,
+    full_page: bool = False,
+    annotate: bool = False,
+    inline: bool = False,
+    tool: str = "screenshot",
+    kind: str = "page",
+) -> dict:
+    """Capture the viewport (or the page), save it, remember its scale, and describe it.
+
+    Shared by ``screenshot`` and the actions' ``capture=true`` after-image.
+    """
+    # A navigation clears the overlay: the cursor is drawn again where it last
+    # acted, so the picture shows what the person at the window sees.
+    await cursor.redraw(ctx, page)
+    found: list[dict] | None = None
+    geo = await marks.page_geometry(page)
+    if annotate:
+        found = await _marks_of(page, geo, full_page=full_page)
+    raw = await take(lambda: _shoot(page, full_page))
+    css_width = (geo[5] if full_page else geo[1]) if geo else None
+    png, scale = marks.process(
+        raw,
+        css_width=css_width,
+        dpr=geo[0] if geo else 1.0,
+        max_edge=ctx.config.capture_max_edge,
+        marks=found,
+    )
+    if geo is not None:
+        marks.remember(
+            page,
+            marks.Geometry(
+                scale=scale,
+                full_page=full_page,
+                scroll=(geo[3], geo[4]),
+                viewport=(geo[1], geo[2]),
+            ),
+        )
+    path = save_capture(ctx.config, png, kind=kind)
+    ctx.audit.record(
+        tool,
+        {
+            "full_page": full_page,
+            "annotate": annotate,
+            "image_path": str(path),
+            "bytes": len(png),
+        },
+    )
+    result = envelope(path, png, url=page.url, inline=inline)
+    if geo is not None:
+        result["scale"] = round(scale, 4)
+        result["viewport"] = [geo[1], geo[2]]
+    if found is not None:
+        result["marks"] = found
+        if not found:
+            result["hint"] = (
+                "No marks: nothing actionable with a box is on screen, or this driver "
+                "gives no geometry. read_page(mode='tree') still lists elements."
+            )
+    return result
+
+
 async def _shoot(page, full_page: bool) -> bytes:
     """The page as PNG, without writing to it.
 
@@ -621,53 +685,20 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         page, err = await acquire_page(ctx, claim=False)
         if err:
             return err
-        # A navigation clears the overlay: the cursor is drawn again where it last
-        # acted, so the picture shows what the person at the window sees.
-        await cursor.redraw(ctx, page)
-        found: list[dict] | None = None
-        geo = await marks.page_geometry(page)
-        if annotate:
-            found = await _marks_of(page, geo, full_page=full_page)
-        raw = await take(lambda: _shoot(page, full_page))
-        css_width = (geo[5] if full_page else geo[1]) if geo else None
-        png, scale = marks.process(
-            raw,
-            css_width=css_width,
-            dpr=geo[0] if geo else 1.0,
-            max_edge=ctx.config.capture_max_edge,
-            marks=found,
-        )
-        if geo is not None:
-            marks.remember(
-                page,
-                marks.Geometry(
-                    scale=scale,
-                    full_page=full_page,
-                    scroll=(geo[3], geo[4]),
-                    viewport=(geo[1], geo[2]),
-                ),
+        settled = None
+        if ctx.config.capture_settle_ms > 0:
+            settled = await evidence.wait_stable(
+                page, timeout_s=ctx.config.capture_settle_ms / 1000
             )
-        path = save_capture(ctx.config, png, kind="page")
-        ctx.audit.record(
-            "screenshot",
-            {
-                "full_page": full_page,
-                "annotate": annotate,
-                "image_path": str(path),
-                "bytes": len(png),
-            },
+        result = await capture_page(
+            ctx, page, full_page=full_page, annotate=annotate, inline=inline, tool="screenshot"
         )
-        result = envelope(path, png, url=page.url, inline=inline)
-        if geo is not None:
-            result["scale"] = round(scale, 4)
-            result["viewport"] = [geo[1], geo[2]]
-        if found is not None:
-            result["marks"] = found
-            if not found:
-                result["hint"] = (
-                    "No marks: nothing actionable with a box is on screen, or this driver "
-                    "gives no geometry. read_page(mode='tree') still lists elements."
-                )
+        if settled is not None and settled.get("stable") is False:
+            result["settled"] = False
+            result["note"] = (
+                f"The page was still changing after {settled['waited_ms']} ms; this is a "
+                "frame of it. wait_for(visual_stable=true) waits longer."
+            )
         return result
 
     @mcp.tool

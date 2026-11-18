@@ -11,7 +11,20 @@ from fastmcp.server.middleware import Middleware, MiddlewareContext
 from fastmcp.tools.tool import ToolResult
 from mcp.types import ImageContent
 
-IMAGE_TOOLS: frozenset[str] = frozenset({"screenshot", "read_image"})
+# Actions attach their after-image only when called with ``capture=true`` (the reply
+# then carries ``image_path``).
+IMAGE_TOOLS: frozenset[str] = frozenset(
+    {
+        "screenshot",
+        "read_image",
+        "click",
+        "type_text",
+        "press_key",
+        "hover",
+        "scroll",
+        "select_option",
+    }
+)
 
 
 def payload_of(result: ToolResult) -> Any:

@@ -492,6 +492,35 @@ by a coordinate click without `submits=true` stopped before it reached the serve
 Playwright's own screenshot writes a style on the page's inputs to hide the caret (2
 mutations per capture, measured); lyra asks it not to (`caret="initial"`).
 
+### Did it change? `visual_change`, `capture=true`, `visual_stable`
+
+`click`, `type_text`, `press_key`, `hover`, `scroll` and `select_option` take a small
+thumbnail of the viewport before and after they act (DevTools `Page.captureScreenshot` at a
+quarter scale: no page script runs) and answer
+`visual_change: {changed, ratio, region}`, `region` being what changed as
+`[left, top, width, height]` in CSS pixels. A click that missed or did nothing says
+`changed: false` without the agent looking at an image. The after-thumbnail is taken 50 ms
+after the action; what arrives later (a fetch, a slow animation) is for
+`wait_for(visual_stable=true)` or a screenshot. The cursor's own box is left out of the
+comparison (the overlay is drawn unscaled in a clipped capture, so it is masked where it
+stands and where the capture shows it).
+
+`capture=true` on any of those tools also returns the image after the action, cursor and
+all (`image_path`, attached as an image for clients that render them, and its `scale` for a
+following `click(x=, y=)`).
+
+`wait_for(visual_stable=true)` waits until two thumbnails 150 ms apart are the same (web
+fonts first), up to `timeout_ms`, and answers `stable`. A `screenshot` does the same for up
+to `LYRA_BROWSER_CAPTURE_SETTLE_MS` (1000) first and says `settled: false` when the page
+was still moving.
+
+Measured 2026-11-18 (Chrome 157, `scripts/verify_evidence_e2e.py`, native and Playwright
+1.65.2 headless, native headful): a no-op click `changed: false`; a click showing a toast
+`changed: true` with the region over the toast; typing a change; a 700 ms transition
+settled within the wait, a never-ending animation answered `timeout` within 1.6 s of a 1 s
+budget. Median time evidence added to a click, N=20 clicks per arm taken in alternation
+(cursor off in both arms): 79–81 ms over four runs (native headless and headful).
+
 ### The virtual cursor
 
 Before `click`, `hover`, `type_text` and `select_option` act, a cursor travels from where
@@ -1080,6 +1109,8 @@ throwaway keyring.
 | `LYRA_BROWSER_CAPTURE_DIR` | — | Where `screenshot`/`read_image` write PNGs. Default: hermes `$HERMES_HOME/cache/browser` (where Hermes' vision may read), else `<data_dir>/captures`. |
 | `LYRA_BROWSER_CAPTURE_KEEP` | `200` | Captures kept on disk; oldest are deleted first. `0` keeps all. |
 | `LYRA_BROWSER_CAPTURE_MAX_EDGE` | `1568` | Captures longer than this on either edge are downscaled; `scale` in the reply says by how much. `0` keeps full size. |
+| `LYRA_BROWSER_EVIDENCE` | on | Action replies carry `visual_change` (see Seeing the page). `off` skips the two thumbnails per action. |
+| `LYRA_BROWSER_CAPTURE_SETTLE_MS` | `1000` | How long a `screenshot` first waits for the page to stop changing on screen. `0` captures at once. |
 | `LYRA_BROWSER_CURSOR` | on | The virtual cursor (see Seeing the page): a pointer drawn with the DevTools overlay that travels to each click, hover, typed field and picked option, the real mouse moving along the same path. `off` removes both. |
 | `LYRA_BROWSER_CURSOR_MS` | `300` | How long the cursor takes to travel to a target. |
 | `LYRA_BROWSER_DOWNLOAD_DIR` | — | Where declared downloads are saved. Default `<data_dir>/downloads`. |
