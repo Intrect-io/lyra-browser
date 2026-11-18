@@ -139,7 +139,7 @@ async def _play(task: str, correct: bool, *, page, tools, sol: dict, base: str, 
         )
     elif task == "tall_bar":
         heights = sol["heights"]
-        i = sol["target"] if correct else heights.index(248)
+        i = sol["target"] if correct else heights.index(239)
         x0, y0 = await _canvas_origin(page, "#c")
         await press_at(x0 + BARS["x0"] + i * BARS["dx"] + BARS["w"] / 2, y0 + BARS["base"] - 20)
     elif task == "far_target":
@@ -168,7 +168,7 @@ async def _play(task: str, correct: bool, *, page, tools, sol: dict, base: str, 
         i = sol["faint"] if correct else (sol["faint"] + 1) % 6
         await press(f'#cards button[data-i="{i}"]')
     elif task == "misaligned":
-        i = sol["off"] if correct else (sol["off"] + 1) % 16
+        i = sol["off"] if correct else (sol["off"] + 1) % 36
         await press(f'#grid .bx[data-i="{i}"]')
     else:
         raise KeyError(task)

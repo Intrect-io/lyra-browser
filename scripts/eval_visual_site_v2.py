@@ -1,10 +1,15 @@
 """Suite v2 of the visual eval: harder tasks, still only solvable by looking.
 
 v1 (``eval_visual_site.py``) asks for things a full screenshot shows plainly. These ask for
-what a downscaled capture loses or a single capture cannot show: text a few pixels tall, two
-bars two pixels apart, a target below the fold, a label that exists only while the pointer
-is over a button, a tile that changed slightly after a "deploy", text covered by another box,
-text nearly the colour of its background, and one box a few pixels out of line.
+what one plain capture barely shows or cannot show at all: 4-character codes drawn 5 px tall
+among one-character near misses, two of 60 bars 1 px apart, a target below the fold, a label
+that exists only while the pointer is over a button, a tile moved by 1 px or shaded slightly
+after a "deploy", text cut off by a box the colour of the card, text of lower contrast than
+its neighbours, and one of 36 boxes 1-2 px out of line.
+
+A first cut (7 px codes, 2 px bars, 3-5 px shifts, near-white text) was solved 16/16 by
+Sonnet through plain screenshots (``docs/measurements/visual-eval/v2/pilot-first-cut.json``),
+so it measured nothing; these are the harder settings.
 
 Same rules as v1: the page reports what the agent did through ``fetch``, the server keeps
 the score, page data is obfuscated, and every answer is a click (nothing is typed and sent),
@@ -32,11 +37,11 @@ GOALS_V2: dict[str, str] = {
         "'This one' on that tile."
     ),
     "overlap": (
-        "On one card, another box covers part of the card's text. Press 'Report' on that card."
+        "On one card, part of the text is hidden behind something. Press 'Report' on that card."
     ),
     "faint_text": (
-        "On one card the text is almost invisible against its background. Press 'Report' on "
-        "that card."
+        "On one card the text has much less contrast against its background than on the "
+        "others. Press 'Report' on that card."
     ),
     "misaligned": "One box in the grid sits a few pixels out of line with the others. Click it.",
 }
@@ -46,8 +51,8 @@ TIPS = ("Archive", "Share", "Print", "Rename", "Move", "Copy")
 _CODE = string.ascii_uppercase.replace("O", "").replace("I", "") + "23456789"
 
 # Geometry the pages draw with and the scripted solver aims at (CSS px).
-TINY = {"cols": 6, "rows": 4, "x0": 30, "y0": 90, "dx": 140, "dy": 100, "w": 120, "h": 80}
-BARS = {"n": 30, "x0": 40, "dx": 28, "w": 10, "base": 330}
+TINY = {"cols": 8, "rows": 6, "x0": 20, "y0": 80, "dx": 105, "dy": 70, "w": 95, "h": 56}
+BARS = {"n": 60, "x0": 30, "dx": 14, "w": 6, "base": 330}
 FAR_TOP = 2600
 
 
@@ -55,14 +60,14 @@ def reset_v2(rng: random.Random, task: str) -> dict[str, Any]:
     """One round of a v2 task: what the page draws, including the answer."""
     if task == "tiny_find":
         n = TINY["cols"] * TINY["rows"]
-        target = "".join(rng.choice(_CODE) for _ in range(3))
+        target = "".join(rng.choice(_CODE) for _ in range(4))
         codes = {target}
-        # Near misses first: one character off, so reading two of three is not enough.
-        while len(codes) < 5:
-            k = rng.randrange(3)
+        # Near misses first: one character off, so reading three of four is not enough.
+        while len(codes) < 9:
+            k = rng.randrange(4)
             codes.add(target[:k] + rng.choice(_CODE) + target[k + 1 :])
         while len(codes) < n:
-            codes.add("".join(rng.choice(_CODE) for _ in range(3)))
+            codes.add("".join(rng.choice(_CODE) for _ in range(4)))
         order = sorted(codes - {target})
         rng.shuffle(order)
         at = rng.randrange(n)
@@ -70,10 +75,10 @@ def reset_v2(rng: random.Random, task: str) -> dict[str, Any]:
         return {"codes": order, "target": at}
     if task == "tall_bar":
         n = BARS["n"]
-        heights = [rng.randint(60, 220) for _ in range(n)]
+        heights = [rng.randint(60, 225) for _ in range(n)]
         first, second = rng.sample(range(n), 2)
-        heights[first] = 250
-        heights[second] = 248
+        heights[first] = 240
+        heights[second] = 239
         return {"heights": heights, "target": first}
     if task == "far_target":
         # Decoys share a shape or a colour with the target; the target is far below the fold.
@@ -105,7 +110,7 @@ def reset_v2(rng: random.Random, task: str) -> dict[str, Any]:
     if task == "faint_text":
         return {"faint": rng.randrange(6)}
     if task == "misaligned":
-        return {"off": rng.randrange(16), "dy": rng.choice([3, -3, 4, -4])}
+        return {"off": rng.randrange(36), "dy": rng.choice([1, -1, 2, -2])}
     raise KeyError(task)
 
 
@@ -145,7 +150,7 @@ g.fillText('Find: ' + DATA.codes[DATA.target], 30, 50);
 DATA.codes.forEach((code, i) => {{
   const x = T.x0 + (i % T.cols) * T.dx, y = T.y0 + Math.floor(i / T.cols) * T.dy;
   g.fillStyle = '#eef1f5'; g.fillRect(x, y, T.w, T.h);
-  g.fillStyle = '#333'; g.font = '7px sans-serif';
+  g.fillStyle = '#333'; g.font = '5px sans-serif';
   g.fillText(code, x + T.w / 2 - 7, y + T.h / 2 + 3);
 }});
 document.getElementById('c').addEventListener('click', (e) => {{
@@ -175,7 +180,7 @@ document.getElementById('c').addEventListener('click', (e) => {{
   const r = e.target.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
   let hit = null;
   DATA.heights.forEach((h, i) => {{ const c = B.x0 + i * B.dx + B.w / 2;
-    if (Math.abs(x - c) <= B.w / 2 + 4 && y <= B.base && y >= B.base - h - 6) hit = i; }});
+    if (Math.abs(x - c) <= B.w / 2 + 3 && y <= B.base && y >= B.base - h - 6) hit = i; }});
   report('click', hit); }});
 </script>""",
     )
@@ -252,8 +257,8 @@ def _page_regression(d: dict) -> tuple[str, str]:
 <script>
 document.getElementById('deploy').addEventListener('click', () => {{
   const t = document.getElementById('t' + DATA.changed);
-  if (DATA.kind === 'shift') t.style.transform = 'translate(5px, 3px)';
-  else t.style.background = '#d4d8de';
+  if (DATA.kind === 'shift') t.style.transform = 'translateX(1px)';
+  else t.style.background = '#d9dce2';
   report('deployed', true); document.getElementById('msg').textContent = 'Deployed.'; }});
 for (const b of document.querySelectorAll('#grid button'))
   b.addEventListener('click', async () => {{ await report('pick', +b.dataset.i);
@@ -280,7 +285,7 @@ def _page_overlap(d: dict) -> tuple[str, str]:
     return (
         "Cards",
         f"""{_CARD_CSS}<h1>Cards</h1><div id="cards">{cards}</div>
-<div id="cover" style="position:absolute;width:110px;height:26px;background:#94a3b8"></div>
+<div id="cover" style="position:absolute;width:110px;height:26px;background:#fafafa"></div>
 <p id="msg"></p>
 <script>
 const k = document.getElementById('k' + DATA.covered).querySelector('p').getBoundingClientRect();
@@ -300,7 +305,7 @@ def _page_faint_text(d: dict) -> tuple[str, str]:
         f"""{_CARD_CSS}<h1>Notices</h1><div id="cards">{cards}</div><p id="msg"></p>
 <script>
 document.querySelectorAll('#cards .card p').forEach((p, i) =>
-  p.style.setProperty('--ink', i === DATA.faint ? '#ececec' : '#222'));
+  p.style.setProperty('--ink', i === DATA.faint ? '#c2c2c2' : '#8a8a8a'));
 for (const b of document.querySelectorAll('#cards button'))
   b.addEventListener('click', async () => {{ await report('report', +b.dataset.i);
     document.getElementById('msg').textContent = 'Reported.'; }});
@@ -309,11 +314,11 @@ for (const b of document.querySelectorAll('#cards button'))
 
 
 def _page_misaligned(d: dict) -> tuple[str, str]:
-    boxes = "".join(f'<button class="bx" data-i="{i}"></button>' for i in range(16))
+    boxes = "".join(f'<button class="bx" data-i="{i}"></button>' for i in range(36))
     return (
         "Grid",
-        f"""<style>#grid{{display:grid;grid-template-columns:repeat(4,70px);gap:14px}}
- .bx{{width:70px;height:46px;background:#fff;border:2px solid #334155;margin:0;padding:0}}</style>
+        f"""<style>#grid{{display:grid;grid-template-columns:repeat(6,46px);gap:10px}}
+ .bx{{width:46px;height:30px;background:#fff;border:2px solid #334155;margin:0;padding:0}}</style>
 <h1>Grid</h1><div id="grid">{boxes}</div>
 <script>
 document.querySelectorAll('#grid .bx').forEach((b, i) => {{

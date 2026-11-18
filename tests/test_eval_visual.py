@@ -118,7 +118,7 @@ def _right_and_wrong_v2(site: EvalSite, task: str) -> tuple[list, list]:
     if task == "faint_text":
         return [("report", d["faint"])], [("report", (d["faint"] + 1) % 6)]
     if task == "misaligned":
-        return [("click", d["off"])], [("click", (d["off"] + 1) % 16)]
+        return [("click", d["off"])], [("click", (d["off"] + 1) % 36)]
     raise KeyError(task)
 
 
@@ -146,9 +146,9 @@ def test_v2_oracle_accepts_the_right_answer_and_rejects_a_wrong_one(task):
 def test_v2_rounds_have_one_answer(seed):
     site = EvalSite(seed=seed)
     tiny = site.solution("tiny_find")
-    assert len(set(tiny["codes"])) == len(tiny["codes"]) == 24
+    assert len(set(tiny["codes"])) == len(tiny["codes"]) == 48
     bars = site.solution("tall_bar")["heights"]
-    assert bars.count(max(bars)) == 1 and sorted(bars)[-1] - sorted(bars)[-2] == 2
+    assert bars.count(max(bars)) == 1 and sorted(bars)[-1] - sorted(bars)[-2] == 1
 
 
 @pytest.mark.parametrize("task", TASKS_V2)
