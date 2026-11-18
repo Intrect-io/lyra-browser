@@ -33,28 +33,10 @@ mkdir -p "$DATA"
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >>"$LOG"; echo "lyra-browser: $*" >&2; }
 
-# What the environment was built from. Rebuilt when the lock, the project
-# metadata or the plugin's install path changes (the path changes with every
-# plugin version, and the venv was installed from that path).
-# sha256sum is GNU coreutils; macOS ships shasum instead (and no sha256sum unless
-# coreutils is installed). Both print the same digest.
-sha256() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum
-  else
-    shasum -a 256
-  fi
-}
+# shellcheck source=stamp.sh
+. "$(dirname "${BASH_SOURCE[0]}")/stamp.sh"
 
-want_stamp() {
-  {
-    cat "$ROOT/pyproject.toml"
-    [[ -f "$ROOT/uv.lock" ]] && cat "$ROOT/uv.lock"
-    echo "root=$ROOT"
-  } | sha256 | cut -d' ' -f1
-}
-
-WANT="$(want_stamp)"
+WANT="$(want_stamp "$ROOT")"
 if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$WANT" && -x "$VENV/bin/lyra-browser" ]]; then
   exit 0
 fi

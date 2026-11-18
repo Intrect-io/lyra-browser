@@ -241,6 +241,25 @@ root; that file is local to a checkout and not tracked, so an installed copy
 has none. `tests/test_claude_plugin.py` validates a copy of the tracked tree,
 which is what Claude Code installs.
 
+### Running the installed plugin on a checkout
+
+`scripts/claude-plugin/dev-install.sh` installs the checkout it lives in into the
+installed plugin's Python environment (`~/.claude/plugins/data/lyra-browser-lyra-browser/venv`,
+whose `installPath` it reads from `~/.claude/plugins/installed_plugins.json`), and stamps it
+the way `bootstrap.sh` would for that installed version, so the next launch keeps it rather
+than rebuilding. Anything else pointed at that venv's `lyra-browser` runs the new code too.
+
+```bash
+scripts/claude-plugin/dev-install.sh            # install this checkout's package
+scripts/claude-plugin/dev-install.sh --verify   # package equals src/, stamp holds, doctor ok, headless smoke
+```
+
+Only the Python package changes: the hooks, skills, launcher and `plugin.json` stay those of
+the installed version, and a real plugin update (a new version, so a new install path)
+rebuilds the venv from that version. A server already running keeps the modules it has
+loaded; new sessions start on the new code. `--data` and `--installed-root` point it
+elsewhere (the tests use both).
+
 Versioning: `plugin.json` pins `version`, so users stay on a version until the
 string changes; `tests/test_claude_plugin.py` keeps it equal to the package
 version in `pyproject.toml`. Bump both for a release, and users run
