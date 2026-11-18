@@ -1,10 +1,10 @@
 {
   "date": "2026-11-18",
-  "lyra_commit": "a1cd4c69f7a2",
+  "lyra_commit": "6765bfb90f3b",
   "chrome_version": "Google Chrome 157.0.8103.38",
   "brain": "claude-code",
-  "model": "haiku",
-  "model_reported": "haiku",
+  "model": "sonnet",
+  "model_reported": "sonnet",
   "repeats": 2,
   "step_budget": 25,
   "tasks": [
@@ -32,49 +32,49 @@
     {
       "task": "tiny_find",
       "repeat": 0,
-      "success": false,
-      "steps": 19,
-      "seconds": 30.5,
+      "success": true,
+      "steps": 8,
+      "seconds": 17.8,
       "exit": "partial"
     },
     {
       "task": "tall_bar",
       "repeat": 0,
       "success": true,
-      "steps": 10,
-      "seconds": 18.7,
+      "steps": 8,
+      "seconds": 16.7,
       "exit": "partial"
     },
     {
       "task": "far_target",
       "repeat": 0,
       "success": true,
-      "steps": 14,
-      "seconds": 20.3,
-      "exit": "partial"
+      "steps": 7,
+      "seconds": 22.4,
+      "exit": "reached_goal"
     },
     {
       "task": "hover_tip",
       "repeat": 0,
       "success": true,
-      "steps": 13,
-      "seconds": 23.7,
-      "exit": "partial"
+      "steps": 9,
+      "seconds": 20.5,
+      "exit": "reached_goal"
     },
     {
       "task": "regression",
       "repeat": 0,
       "success": true,
-      "steps": 8,
-      "seconds": 16.4,
+      "steps": 7,
+      "seconds": 16.7,
       "exit": "reached_goal"
     },
     {
       "task": "overlap",
       "repeat": 0,
       "success": true,
-      "steps": 8,
-      "seconds": 13.7,
+      "steps": 5,
+      "seconds": 11.7,
       "exit": "reached_goal"
     },
     {
@@ -82,91 +82,91 @@
       "repeat": 0,
       "success": true,
       "steps": 5,
-      "seconds": 10.4,
+      "seconds": 12.9,
       "exit": "reached_goal"
     },
     {
       "task": "misaligned",
       "repeat": 0,
       "success": true,
-      "steps": 9,
-      "seconds": 16.1,
-      "exit": "reached_goal"
+      "steps": 6,
+      "seconds": 14.2,
+      "exit": "partial"
     },
     {
       "task": "tiny_find",
       "repeat": 1,
       "success": true,
-      "steps": 17,
-      "seconds": 29.9,
+      "steps": 8,
+      "seconds": 22.6,
       "exit": "partial"
     },
     {
       "task": "tall_bar",
       "repeat": 1,
       "success": true,
-      "steps": 9,
-      "seconds": 18.9,
+      "steps": 6,
+      "seconds": 17.7,
       "exit": "partial"
     },
     {
       "task": "far_target",
       "repeat": 1,
       "success": true,
-      "steps": 11,
-      "seconds": 17.9,
+      "steps": 7,
+      "seconds": 18.4,
       "exit": "partial"
     },
     {
       "task": "hover_tip",
       "repeat": 1,
       "success": true,
-      "steps": 19,
-      "seconds": 36.5,
+      "steps": 8,
+      "seconds": 16.2,
       "exit": "reached_goal"
     },
     {
       "task": "regression",
       "repeat": 1,
-      "success": false,
-      "steps": 7,
-      "seconds": 12.5,
-      "exit": "blocked"
+      "success": true,
+      "steps": 6,
+      "seconds": 14.1,
+      "exit": "reached_goal"
     },
     {
       "task": "overlap",
       "repeat": 1,
-      "success": false,
-      "steps": 10,
-      "seconds": 14.6,
-      "exit": "blocked"
+      "success": true,
+      "steps": 4,
+      "seconds": 14.2,
+      "exit": "reached_goal"
     },
     {
       "task": "faint_text",
       "repeat": 1,
-      "success": false,
-      "steps": 7,
-      "seconds": 11.5,
-      "exit": "blocked"
+      "success": true,
+      "steps": 4,
+      "seconds": 9.7,
+      "exit": "reached_goal"
     },
     {
       "task": "misaligned",
       "repeat": 1,
       "success": true,
-      "steps": 7,
-      "seconds": 13.3,
+      "steps": 6,
+      "seconds": 14.3,
       "exit": "reached_goal"
     }
   ],
-  "success_rate": 0.75,
+  "success_rate": 1.0,
   "per_task": {
-    "tiny_find": 0.5,
+    "tiny_find": 1.0,
     "tall_bar": 1.0,
     "far_target": 1.0,
     "hover_tip": 1.0,
-    "regression": 0.5,
-    "overlap": 0.5,
-    "faint_text": 0.5,
+    "regression": 1.0,
+    "overlap": 1.0,
+    "faint_text": 1.0,
     "misaligned": 1.0
   }
 }
