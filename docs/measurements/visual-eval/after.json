@@ -1,0 +1,171 @@
+{
+  "date": "2026-11-18",
+  "lyra_commit": "85e47120e610",
+  "chrome_version": "Google Chrome 157.0.8103.38",
+  "brain": "claude-code",
+  "model": "sonnet",
+  "model_reported": "sonnet",
+  "repeats": 2,
+  "step_budget": 25,
+  "tasks": [
+    "canvas_target",
+    "icon_toolbar",
+    "toast_code",
+    "color_state",
+    "canvas_modal",
+    "chart_value",
+    "layout_fault",
+    "changed_panel"
+  ],
+  "goals": {
+    "canvas_target": "On this page, click the green star.",
+    "icon_toolbar": "On this page, click the button whose icon is a trash can (delete).",
+    "toast_code": "Press 'Generate code'. A code appears for a moment. Type that code into the Code box and press Check.",
+    "color_state": "Press 'Next colour' until the big square is blue, then press Done.",
+    "canvas_modal": "Close the dialog that covers the page (its close button is an X), then press Continue.",
+    "chart_value": "Read the value of the 'Mar' bar in the chart, type it into the Value box and press Check.",
+    "layout_fault": "One of the four cards has text spilling out of its box. Press 'Report' on that card.",
+    "changed_panel": "Press 'Apply theme'. One of the three panels changes colour: press 'This one' on that panel."
+  },
+  "episodes": [
+    {
+      "task": "canvas_target",
+      "repeat": 0,
+      "success": true,
+      "steps": 6,
+      "seconds": 18.2,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "icon_toolbar",
+      "repeat": 0,
+      "success": true,
+      "steps": 6,
+      "seconds": 12.0,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "toast_code",
+      "repeat": 0,
+      "success": true,
+      "steps": 7,
+      "seconds": 14.9,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "color_state",
+      "repeat": 0,
+      "success": true,
+      "steps": 6,
+      "seconds": 13.3,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "canvas_modal",
+      "repeat": 0,
+      "success": true,
+      "steps": 10,
+      "seconds": 18.3,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "chart_value",
+      "repeat": 0,
+      "success": false,
+      "steps": 5,
+      "seconds": 9.2,
+      "exit": "partial"
+    },
+    {
+      "task": "layout_fault",
+      "repeat": 0,
+      "success": true,
+      "steps": 5,
+      "seconds": 13.6,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "changed_panel",
+      "repeat": 0,
+      "success": true,
+      "steps": 5,
+      "seconds": 15.3,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "canvas_target",
+      "repeat": 1,
+      "success": true,
+      "steps": 5,
+      "seconds": 10.9,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "icon_toolbar",
+      "repeat": 1,
+      "success": true,
+      "steps": 6,
+      "seconds": 12.1,
+      "exit": "partial"
+    },
+    {
+      "task": "toast_code",
+      "repeat": 1,
+      "success": true,
+      "steps": 6,
+      "seconds": 13.8,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "color_state",
+      "repeat": 1,
+      "success": true,
+      "steps": 7,
+      "seconds": 15.9,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "canvas_modal",
+      "repeat": 1,
+      "success": true,
+      "steps": 9,
+      "seconds": 18.0,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "chart_value",
+      "repeat": 1,
+      "success": false,
+      "steps": 5,
+      "seconds": 10.1,
+      "exit": "partial"
+    },
+    {
+      "task": "layout_fault",
+      "repeat": 1,
+      "success": true,
+      "steps": 4,
+      "seconds": 9.1,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "changed_panel",
+      "repeat": 1,
+      "success": true,
+      "steps": 5,
+      "seconds": 12.8,
+      "exit": "reached_goal"
+    }
+  ],
+  "success_rate": 0.875,
+  "per_task": {
+    "canvas_target": 1.0,
+    "icon_toolbar": 1.0,
+    "toast_code": 1.0,
+    "color_state": 1.0,
+    "canvas_modal": 1.0,
+    "chart_value": 0.0,
+    "layout_fault": 1.0,
+    "changed_panel": 1.0
+  }
+}

@@ -548,6 +548,38 @@ navigation measured under "Looking like the user's Chrome" are unchanged. Whethe
 that watches the DevTools agents during interaction notices them is not measured;
 `LYRA_BROWSER_CURSOR=off` is the switch if one does.
 
+### Measured: tasks that need sight (`docs/measurements/visual-eval`)
+
+`scripts/eval_visual.py` serves eight loopback tasks whose answer is only in pixels (a
+target drawn on a canvas, icon-only buttons, a code shown for 2.5 s, a CSS colour, a dialog
+whose close button is drawn, a chart value, text spilling out of its box, a panel that
+changes colour; the page data is obfuscated, so reading the DOM does not give it away). The
+site scores what the page saw the agent do, never the agent's own account. Each task is a
+`lyra-uat` persona run with the `claude-code` brain, headless, step budget 25, every
+episode on a fresh round of its task. `--brain scripted` is the oracle self-test, a gate:
+each task played right and wrong through a real browser, the right play accepted and the
+wrong one refused.
+
+| | `baseline.json` | `after.json` |
+| --- | --- | --- |
+| date, lyra commit | 2026-11-18, `fff31878b9d1` (before marks, coordinates, evidence and the cursor) | 2026-11-18, `85e47120e610` |
+| brain, model, Chrome | `claude-code`, Sonnet, Chrome 157.0.8103.38 | same |
+| episodes (8 tasks x 2) | 16 | 16 |
+| success rate | **0.625** (10/16) | **0.875** (14/16) |
+| `canvas_target`, `canvas_modal` | 0/2 each | 2/2 each |
+| `chart_value` | 0/2 | 0/2 |
+| the other five | 2/2 each | 2/2 each |
+
+What changed for the two canvas tasks is `click(x=, y=)` at the pixels of a screenshot.
+Both `chart_value` failures in `after.json` are the same step: the model typed the value it
+read and pressed Check with `submits=true`, which asked for permission to send a form; the
+run's closed policy answers no prompt, so it was refused (`needs_approval`) and the value
+never reached the page. Whether the values read were right is not measured, since the page
+never saw them. That refusal is the consent layer working as documented: a declared
+send is asked about even where nothing would be posted, because the declaration also
+covers a send by `fetch` that the enforcement layer cannot see. N=2 per task is small; the
+per-task numbers say which tasks moved, not by how much.
+
 ## Permissions
 
 The agent declares what it intends; the browser is judged on what it actually
