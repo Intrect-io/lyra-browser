@@ -492,6 +492,26 @@ by a coordinate click without `submits=true` stopped before it reached the serve
 Playwright's own screenshot writes a style on the page's inputs to hide the caret (2
 mutations per capture, measured); lyra asks it not to (`caret="initial"`).
 
+### Zoom: `screenshot(region=[x, y, width, height])`
+
+A region of the latest screenshot (its pixels) is captured again on its own, rendered by
+Chrome at up to 4x (`Page.captureScreenshot` with `clip.scale`, as large as
+`LYRA_BROWSER_CAPTURE_MAX_EDGE` allows), so small text, a dense chart or a fault of a pixel
+or two gains real detail rather than being upsampled. The reply carries the zoom's own
+`scale`, `origin` (its top-left in viewport CSS pixels) and `region_css`; `click(x=, y=)` and
+`hover(x=, y=)` then take pixels of the zoomed image. A region needs a screenshot of the page
+first; an empty one answers `empty` and one that is no longer on screen `outside_viewport`.
+Nothing is written to the page.
+
+Measured 2026-11-19 with Chrome 157.0.8103.38 (`scripts/verify_zoom_e2e.py`, native and
+Playwright 1.65.2 headless, native headful under Xvfb): the zoom of four colour blocks,
+brought back to the full capture's size, differs from it by a mean of under 8/255 per
+channel at device pixel ratio 1 and 2; of 1 CSS px stripes that a capture downscaled to
+1000 px shows 67 of 119 edges, the zoom shows all 119, at 4x its density (scale 4.0 against
+0.78); a click at a point of the zoom lands within 1 CSS px of the centre of a 4x4 CSS px
+target, after scrolling and at a ratio of 2 too; a hover there reaches it; the page's
+`MutationObserver` records 0 mutations.
+
 ### Did it change? `visual_change`, `capture=true`, `visual_stable`
 
 `click`, `type_text`, `press_key`, `hover`, `scroll` and `select_option` take a small
