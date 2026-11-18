@@ -103,6 +103,10 @@ async def _send(page: Any, method: str, params: dict | None = None) -> Any:
     return await st.cdp.send(method, params or {})
 
 
+# Other modules that need one DevTools command on either driver (a zoomed capture).
+send_cdp = _send
+
+
 async def _ensure_overlay(page: Any) -> None:
     st = _state(page)
     # The overlay agent needs the DOM agent. Enabling is per session, so once per page;
