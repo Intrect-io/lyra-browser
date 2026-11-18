@@ -526,8 +526,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         Set ``submits=true`` when the choice sends the form (an ``onchange``
         that posts) — that asks for the permission it needs.
 
-        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px) says
-        whether the page visibly changed. ``capture=true`` also returns the image after
+        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px, and
+        ``region_px`` in pixels of the latest screenshot, for ``screenshot(region=...)``)
+        says whether and where the page visibly changed; with a ``screenshot(name=...)``
+        held, ``compare_hint`` names it. ``capture=true`` also returns the image after
         the action (``image_path``; its ``scale`` serves a later ``click(x, y)``).
         """
         chosen = [

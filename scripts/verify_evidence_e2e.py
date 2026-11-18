@@ -5,7 +5,9 @@ Same contract as the other ``verify_*_e2e.py`` gates (temporary profile, loopbac
 ``build_tools``; ``LYRA_BROWSER_DRIVER`` picks the driver). Asserted:
 
 - a click that changes nothing answers ``visual_change.changed: false``; one that shows a
-  toast answers ``true`` with a ``region`` over the toast; typing into a field is a change;
+  toast answers ``true`` with a ``region`` over the toast (and ``region_px`` on it in the
+  latest screenshot's pixels, at scale 1 and downscaled); typing into a field is a change;
+  with a named snapshot held, a change (not a no-op) carries ``compare_hint`` naming it;
 - ``capture=true`` returns the after-image (file, scale), with the cursor at the click;
 - ``wait_for(visual_stable=true)`` returns once a 700 ms animation has ended, and answers
   ``timeout`` (``stable: false``) within its budget on a page that never stops moving; a
@@ -97,6 +99,55 @@ async def ab_click_ms(ctx, tools) -> tuple[float, float]:
     return statistics.median(on), statistics.median(off)
 
 
+def iou(a, b) -> float:
+    ax0, ay0, aw, ah = a
+    bx0, by0, bw, bh = b
+    ix = max(0.0, min(ax0 + aw, bx0 + bw) - max(ax0, bx0))
+    iy = max(0.0, min(ay0 + ah, by0 + bh) - max(ay0, by0))
+    inter = ix * iy
+    union = aw * ah + bw * bh - inter
+    return inter / union if union else 0.0
+
+
+async def toast_in_pixels(tools, page, base: str, *, label: str) -> dict:
+    """Reload, screenshot, show the toast: ``region_px`` must sit on it in that image."""
+    expect((await tools["navigate"](url=base))["status"] == "ok", f"{label}: page loads again")
+    shot = await tools["screenshot"]()
+    res = await tools["click"](selector="#toastb")
+    vc = res.get("visual_change") or {}
+    toast = await page.locator("#t").first.evaluate(RECT_JS)
+    want = [v * shot["scale"] for v in toast]
+    got = vc.get("region_px")
+    score = iou(got, want) if got else 0.0
+    expect(
+        score >= 0.5,
+        f"{label}: region_px is on the toast in the screenshot (IoU >= 0.5)",
+        (got, want, score),
+    )
+    return res
+
+
+async def next_look(ctx, tools, page, base: str) -> None:
+    """region_px at scale 1 and downscaled; compare_hint only with a snapshot and a change."""
+    res = await toast_in_pixels(tools, page, base, label="scale 1")
+    expect("compare_hint" not in res, "no snapshot held, no compare hint", res)
+    edge = ctx.config.capture_max_edge
+    ctx.config.capture_max_edge = 1000
+    await toast_in_pixels(tools, page, base, label="downscaled to 1000 px")
+    ctx.config.capture_max_edge = edge
+
+    expect((await tools["navigate"](url=base))["status"] == "ok", "the page loads again")
+    await tools["screenshot"](name="before")
+    res = await tools["click"](selector="#noop")
+    expect("compare_hint" not in res, "a snapshot held but no change: no hint", res)
+    res = await tools["click"](selector="#toastb")
+    expect(
+        res.get("snapshots") == ["before"] and 'compare_to="before"' in res.get("compare_hint", ""),
+        "a change with a snapshot held names it and hints to compare",
+        res,
+    )
+
+
 async def run_mode(base: str, *, headless: bool) -> None:
     from lyra_browser.context import acquire_page
 
@@ -139,6 +190,8 @@ async def run_mode(base: str, *, headless: bool) -> None:
         box = tuple(round(v * scale) for v in around(point))
         n = cursor_pixels(Path(res["image_path"]).read_bytes(), box)
         expect(n >= 40, "the after-image shows the cursor where it clicked", n)
+
+        await next_look(ctx, tools, page, base)
 
         await tools["click"](selector="#anim")
         res = await tools["wait_for"](visual_stable=True, timeout_ms=4000)

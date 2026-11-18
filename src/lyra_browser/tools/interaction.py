@@ -370,8 +370,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         apply (declare ``submits``/``download`` as for a selector). A point that is
         not on screen any more answers ``outside_viewport``: take a new screenshot.
 
-        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px) says
-        whether the page visibly changed. ``capture=true`` also returns the image after
+        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px, and
+        ``region_px`` in pixels of the latest screenshot, for ``screenshot(region=...)``)
+        says whether and where the page visibly changed; with a ``screenshot(name=...)``
+        held, ``compare_hint`` names it. ``capture=true`` also returns the image after
         the action (``image_path``; its ``scale`` serves a later ``click(x, y)``).
         """
         if x is not None or y is not None:
@@ -488,8 +490,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         A native dialog the page raised is answered at once and listed under
         ``dialogs`` in the reply.
 
-        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px) says
-        whether the page visibly changed. ``capture=true`` also returns the image after
+        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px, and
+        ``region_px`` in pixels of the latest screenshot, for ``screenshot(region=...)``)
+        says whether and where the page visibly changed; with a ``screenshot(name=...)``
+        held, ``compare_hint`` names it. ``capture=true`` also returns the image after
         the action (``image_path``; its ``scale`` serves a later ``click(x, y)``).
         """
         page, err = await acquire_page(ctx)
@@ -578,8 +582,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         A native dialog the page raised is answered at once and listed under
         ``dialogs`` in the reply.
 
-        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px) says
-        whether the page visibly changed. ``capture=true`` also returns the image after
+        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px, and
+        ``region_px`` in pixels of the latest screenshot, for ``screenshot(region=...)``)
+        says whether and where the page visibly changed; with a ``screenshot(name=...)``
+        held, ``compare_hint`` names it. ``capture=true`` also returns the image after
         the action (``image_path``; its ``scale`` serves a later ``click(x, y)``).
         """
         page, err = await acquire_page(ctx)
@@ -648,8 +654,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
 
         ``x`` and ``y`` hover a point instead: pixels of the latest ``screenshot``.
 
-        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px) says
-        whether the page visibly changed. ``capture=true`` also returns the image after
+        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px, and
+        ``region_px`` in pixels of the latest screenshot, for ``screenshot(region=...)``)
+        says whether and where the page visibly changed; with a ``screenshot(name=...)``
+        held, ``compare_hint`` names it. ``capture=true`` also returns the image after
         the action (``image_path``; its ``scale`` serves a later ``click(x, y)``).
         """
         if x is not None or y is not None:
@@ -757,8 +765,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         ``selector`` fails fast like ``click`` (``not_found``, ``hidden``,
         ``disabled``, ``timeout``, ``page_closed``).
 
-        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px) says
-        whether the page visibly changed. ``capture=true`` also returns the image after
+        The reply's ``visual_change`` (``changed``, ``ratio``, ``region`` in CSS px, and
+        ``region_px`` in pixels of the latest screenshot, for ``screenshot(region=...)``)
+        says whether and where the page visibly changed; with a ``screenshot(name=...)``
+        held, ``compare_hint`` names it. ``capture=true`` also returns the image after
         the action (``image_path``; its ``scale`` serves a later ``click(x, y)``).
         """
         chosen = [
