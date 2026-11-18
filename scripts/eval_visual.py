@@ -16,7 +16,11 @@ Two modes:
   ``lyra-uat`` persona run against a fresh round of the task, and the result file
   (``--out``) records each episode's success, steps and seconds. No home paths are written.
 
+``--suite v2`` picks the harder tasks of ``eval_visual_site_v2.py`` (tiny text, close bars,
+below the fold, hover-only labels, a subtle regression, overlap, low contrast, misalignment).
+
     python scripts/eval_visual.py --brain scripted --headless-only
+    python scripts/eval_visual.py --brain scripted --suite v2 --headless-only
     python scripts/eval_visual.py --brain claude-code --model sonnet --repeats 2 \
         --out docs/measurements/visual-eval/baseline.json
 """
@@ -37,7 +41,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from eval_visual_site import GOALS, TASKS, EvalSite, serve  # noqa: E402
+from eval_visual_site import ALL_GOALS, SUITES, EvalSite, serve  # noqa: E402
+from eval_visual_site_v2 import BARS, TINY  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -124,11 +129,52 @@ async def _play(task: str, correct: bool, *, page, tools, sol: dict, base: str, 
         await press("#apply")
         i = sol["changed"] if correct else (sol["changed"] + 1) % 3
         await press(f'.panel button[data-i="{i}"]')
+    elif task == "tiny_find":
+        i = sol["target"] if correct else (sol["target"] + 1) % len(sol["codes"])
+        x0, y0 = await _canvas_origin(page, "#c")
+        col, row = i % TINY["cols"], i // TINY["cols"]
+        await press_at(
+            x0 + TINY["x0"] + col * TINY["dx"] + TINY["w"] / 2,
+            y0 + TINY["y0"] + row * TINY["dy"] + TINY["h"] / 2,
+        )
+    elif task == "tall_bar":
+        heights = sol["heights"]
+        i = sol["target"] if correct else heights.index(239)
+        x0, y0 = await _canvas_origin(page, "#c")
+        await press_at(x0 + BARS["x0"] + i * BARS["dx"] + BARS["w"] / 2, y0 + BARS["base"] - 20)
+    elif task == "far_target":
+        if correct:
+            await page.evaluate("document.getElementById('c2').scrollIntoView({block:'center'})")
+            await asyncio.sleep(0.2)
+            shape = next(s for s in sol["far"] if s["id"] == sol["target"])
+            x0, y0 = await _canvas_origin(page, "#c2")
+        else:
+            shape = next(s for s in sol["top"] if s["shape"] == "hexagon")
+            x0, y0 = await _canvas_origin(page, "#c1")
+        await press_at(x0 + shape["x"], y0 + shape["y"])
+    elif task == "hover_tip":
+        i = sol["target"] if correct else (sol["target"] + 1) % len(sol["tips"])
+        r = await tools["hover"](selector=f'#bar .rb[data-i="{i}"]')
+        assert r.get("status") == "ok", r
+        await press(f'#bar .rb[data-i="{i}"]')
+    elif task == "regression":
+        await press("#deploy")
+        i = sol["changed"] if correct else (sol["changed"] + 1) % 12
+        await press(f'#grid button[data-i="{i}"]')
+    elif task == "overlap":
+        i = sol["covered"] if correct else (sol["covered"] + 1) % 4
+        await press(f'#cards button[data-i="{i}"]')
+    elif task == "faint_text":
+        i = sol["faint"] if correct else (sol["faint"] + 1) % 6
+        await press(f'#cards button[data-i="{i}"]')
+    elif task == "misaligned":
+        i = sol["off"] if correct else (sol["off"] + 1) % 36
+        await press(f'#grid .bx[data-i="{i}"]')
     else:
         raise KeyError(task)
 
 
-async def scripted(headless: bool) -> int:
+async def scripted(headless: bool, suite: str = "v1") -> int:
     from verify_browser_e2e import build_tools
 
     from lyra_browser.context import acquire_page
@@ -147,7 +193,7 @@ async def scripted(headless: bool) -> int:
             expect(False, "control endpoints refuse a wrong token")
         except urllib.error.HTTPError as exc:
             expect(exc.code == 403, "control endpoints refuse a wrong token", exc.code)
-        for task in TASKS:
+        for task in SUITES[suite]:
             for correct in (True, False):
                 _get(base, task, "reset", site.token)
                 nav = await tools["navigate"](url=f"{base}/task/{task}")
@@ -187,6 +233,13 @@ def _leaks(task: str, sol: dict, text: str) -> str:
         return "trash" if "trash" in text.lower() else ""
     if task == "canvas_target":
         return "star" if "star" in text.lower() else ""
+    if task == "tiny_find":
+        code = sol["codes"][sol["target"]]
+        return code if code in text else ""
+    if task == "hover_tip":
+        return "archive" if "archive" in text.lower() else ""
+    if task == "far_target":
+        return "hexagon" if "hexagon" in text.lower() else ""
     return ""
 
 
@@ -216,7 +269,7 @@ async def measure(args: argparse.Namespace) -> int:
     site = EvalSite()
     server = serve(site)
     base = f"http://127.0.0.1:{server.server_address[1]}"
-    tasks = [t for t in TASKS if not args.tasks or t in args.tasks.split(",")]
+    tasks = [t for t in SUITES[args.suite] if not args.tasks or t in args.tasks.split(",")]
     episodes: list[dict] = []
     model_seen: str | None = None
     out_root = Path(tempfile.mkdtemp(prefix="lyra-eval-runs-"))
@@ -229,7 +282,7 @@ async def measure(args: argparse.Namespace) -> int:
                         id=f"eval-{task}",
                         name="Visual eval",
                         entry_url=f"{base}/task/{task}",
-                        goal=GOALS[task],
+                        goal=ALL_GOALS[task],
                         success_criteria=["The page has registered the requested action."],
                         step_budget=args.steps,
                     ),
@@ -277,7 +330,8 @@ async def measure(args: argparse.Namespace) -> int:
         "repeats": args.repeats,
         "step_budget": args.steps,
         "tasks": tasks,
-        "goals": {t: GOALS[t] for t in tasks},
+        "suite": args.suite,
+        "goals": {t: ALL_GOALS[t] for t in tasks},
         "episodes": episodes,
         "success_rate": round(rate, 4),
         "per_task": {
@@ -308,6 +362,7 @@ def main() -> int:
     parser.add_argument("--max-turns", type=int, default=60)
     parser.add_argument("--max-budget-usd", type=float, default=None)
     parser.add_argument("--wall-s", type=int, default=480)
+    parser.add_argument("--suite", choices=sorted(SUITES), default="v1")
     parser.add_argument("--tasks", default="", help="comma-separated subset")
     parser.add_argument("--out", default="")
     parser.add_argument("--keep-runs", action="store_true")
@@ -316,7 +371,7 @@ def main() -> int:
     group.add_argument("--headful-only", action="store_true")
     args = parser.parse_args()
     if args.brain == "scripted":
-        return asyncio.run(scripted(headless=not args.headful_only))
+        return asyncio.run(scripted(headless=not args.headful_only, suite=args.suite))
     os.environ.setdefault("LYRA_UAT_QUIET", "1")
     return asyncio.run(measure(args))
 
