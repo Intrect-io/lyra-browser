@@ -20,6 +20,7 @@ turns all of it off: no overlay, no extra pointer movement.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import math
 import weakref
 from dataclasses import dataclass
@@ -101,6 +102,10 @@ async def _send(page: Any, method: str, params: dict | None = None) -> Any:
     if st.cdp is None:
         st.cdp = await page.context.new_cdp_session(page)
     return await st.cdp.send(method, params or {})
+
+
+# Other modules that need one DevTools command on either driver (a zoomed capture).
+send_cdp = _send
 
 
 async def _ensure_overlay(page: Any) -> None:
@@ -189,6 +194,25 @@ async def hide(ctx: Any, page: Any) -> None:
         await _send(page, "Overlay.hideHighlight")
     except Exception:  # noqa: BLE001
         pass
+
+
+@contextlib.asynccontextmanager
+async def out_of_frame(ctx: Any, page: Any):
+    """Keep the cursor off the screen for one capture, then put it back where it was.
+
+    For captures that are compared: the cursor moving between two of them would be a
+    change of lyra's own, not the page's.
+    """
+    st = _state(page)
+    was = st.shown
+    if was:
+        await hide(ctx, page)
+    try:
+        yield
+    finally:
+        if was:
+            st.shown = True
+            await redraw(ctx, page)
 
 
 async def hide_current(ctx: Any) -> None:
