@@ -203,6 +203,12 @@ class FakeMouse:
     def __init__(self, page: FakePage) -> None:
         self._page = page
 
+    async def move(self, x: float, y: float, **_: Any) -> None:
+        self._page.calls.append(("mouse_move", x, y))
+
+    async def click(self, x: float, y: float, **_: Any) -> None:
+        self._page.calls.append(("mouse_click", x, y))
+
     async def wheel(self, delta_x: float, delta_y: float) -> None:
         self._page.calls.append(("wheel", delta_x, delta_y))
         if not self._page.scroll_locked:

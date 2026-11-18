@@ -30,6 +30,9 @@ dependencies = [
     # Secret Service that holds the key of keyring-sealed (v11) cookies.
     "cryptography>=42",
     "secretstorage>=3.3; sys_platform == 'linux'",
+    # Captures: annotated screenshots (marks drawn on the PNG, never in the page) and
+    # downscaling to a max edge.
+    "pillow>=10.1",
 ]
 
 [project.optional-dependencies]

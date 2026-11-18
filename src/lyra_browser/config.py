@@ -438,6 +438,9 @@ class Config:
     # agent that looks at the page on every turn would otherwise fill the disk
     # over a long session. Oldest go first; 0 disables pruning.
     capture_keep: int = 200
+    # Captures larger than this on their long edge are downscaled (``0``: never), and
+    # report the ``scale`` that maps their pixels back to CSS pixels (marks.py).
+    capture_max_edge: int = 1568
 
     # Where downloads land — derived like capture_dir, see _default_download_dir.
     download_dir: Path = field(init=False)
@@ -513,6 +516,11 @@ class Config:
     # model sets (see bypass.py). ``denied_origins``, opaque origins and a takeover
     # still win.
     follow_bypass: bool = True
+    # The virtual cursor (cursor.py): a pointer drawn with the DevTools overlay that
+    # travels to each pointer action's target, the real mouse moving along the same
+    # path. ``LYRA_BROWSER_CURSOR=off`` removes both. ``cursor_ms`` is the travel time.
+    cursor: bool = True
+    cursor_ms: int = 300
     # How long an unanswered prompt holds its tool call before it becomes a
     # denial. Five minutes suits a person at a screen; a gateway nobody is
     # watching wants it short (docs/HERMES_INTEGRATION.md).
@@ -701,6 +709,15 @@ class Config:
                 _env("LYRA_BROWSER_GUARD") or cls.__dataclass_fields__["guard_backend"].default
             ),
             sandbox=_as_bool(_env("LYRA_BROWSER_SANDBOX"), default=True),
+            cursor=_as_optional_bool(_env("LYRA_BROWSER_CURSOR")) is not False,
+            cursor_ms=_as_int(
+                _env("LYRA_BROWSER_CURSOR_MS"),
+                default=cls.__dataclass_fields__["cursor_ms"].default,
+            ),
+            capture_max_edge=_as_int(
+                _env("LYRA_BROWSER_CAPTURE_MAX_EDGE"),
+                default=cls.__dataclass_fields__["capture_max_edge"].default,
+            ),
             capture_keep=_as_int(
                 _env("LYRA_BROWSER_CAPTURE_KEEP"),
                 default=cls.__dataclass_fields__["capture_keep"].default,

@@ -26,6 +26,7 @@ import asyncio
 
 from fastmcp import FastMCP
 
+from .. import cursor, marks
 from ..approval import TakeoverActive
 from ..context import ServerContext, acquire_page
 from ..downloads import KEYBOARD_SETTLE_SCALE
@@ -99,6 +100,20 @@ _DESCRIBE_JS = """(el) => {
 # (short) budget and gives the real answer.
 _DESCRIBE_BUDGET_S = 1.0
 _NAME_CHARS = 80
+
+# What a point lands on, described like a selector's target (a report, not a gate).
+_AT_POINT_JS = (
+    "([x, y]) => { const el = document.elementFromPoint(x, y);"
+    " return el ? (" + _DESCRIBE_JS + ")(el) : null; }"
+)
+
+
+async def _element_at(page, x: float, y: float) -> dict | None:
+    try:
+        return await asyncio.wait_for(page.evaluate(_AT_POINT_JS, [x, y]), _DESCRIBE_BUDGET_S)
+    except Exception:  # noqa: BLE001 — a report only
+        return None
+
 
 # Where the page is scrolled to, and how far it can go. ``at_bottom`` allows a
 # couple of pixels: fractional scroll positions on a scaled display otherwise
@@ -200,14 +215,113 @@ async def _settled_scroll(page) -> dict:
 
 
 def register(mcp: FastMCP, ctx: ServerContext) -> None:
+    def _no_target() -> dict:
+        return {
+            "status": "error",
+            "reason": "Give a selector, or x and y (pixels of the latest screenshot).",
+        }
+
+    async def _pointer_at(
+        tool: str,
+        x: float | None,
+        y: float | None,
+        *,
+        reason: str,
+        submits: bool,
+        confirm: bool,
+        timeout_ms: int,
+        download: bool,
+    ) -> dict:
+        """click/hover at a point of the latest capture, behind the same gates."""
+        if x is None or y is None:
+            return {"status": "error", "reason": "x and y go together."}
+        page, err = await acquire_page(ctx)
+        if err:
+            return err
+        origin = page_origin(page)
+        try:
+            ctx.collab.assert_agent_may_act()
+        except TakeoverActive as exc:
+            return exc.envelope()
+        args = {"x": x, "y": y}
+        timeout = clamp_timeout(timeout_ms)
+        now = await marks.page_geometry(page)
+        cx, cy = marks.to_viewport(page, float(x), float(y), now)
+        if now is not None and not (0 <= cx < now[1] and 0 <= cy < now[2]):
+            ctx.audit.record(tool, args, status="outside_viewport", origin=origin.describe())
+            return {
+                "status": "outside_viewport",
+                "x": x,
+                "y": y,
+                "point_css": [round(cx, 1), round(cy, 1)],
+                "viewport": [now[1], now[2]],
+                "hint": "That point is not on screen now. Take a new screenshot (the page "
+                "may have scrolled) and use its pixels.",
+            }
+        clicking = tool == "click"
+        denied, bought = await require(
+            ctx,
+            tool,
+            target=origin,
+            capabilities=_scopes(submits and clicking, download and clicking),
+            initiator=origin,
+            reason=reason,
+            confirm=confirm,
+            subject=getattr(page, "url", ""),
+        )
+        if denied:
+            return denied
+        watch = ctx.downloads.watch(
+            bought, declared=download and clicking, start_budget_s=timeout / 1000
+        )
+        after = Aftermath(ctx, page)
+        async with guard_action(
+            ctx,
+            bought,
+            tool=tool,
+            selector=f"point({x},{y})",
+            page=page,
+            origin=origin,
+            args=args,
+            timeout_ms=timeout,
+        ) as done:
+            async with watch:
+                hit = await _element_at(page, cx, cy)
+                await cursor.travel(ctx, page, cx, cy)
+                if clicking:
+                    await page.mouse.click(cx, cy)
+                else:
+                    await page.mouse.move(cx, cy)
+                after.acted()
+                await watch.settle()
+            done.result = {
+                "status": "ok",
+                "url": page.url,
+                "point_css": [round(cx, 1), round(cy, 1)],
+            }
+            if hit:
+                done.result["clicked" if clicking else "hovered"] = hit
+            if clicking:
+                report_dialogs(ctx, done.result)
+            watch.apply(done.result)
+            status = await after.fold(
+                done.result,
+                caused_by=tool,
+                declare="submits=true" if clicking and not submits else "",
+            )
+            ctx.audit.record(tool, args, status=status, origin=origin.describe())
+        return done.result
+
     @mcp.tool
     async def click(
-        selector: str,
+        selector: str = "",
         reason: str = "",
         submits: bool = False,
         confirm: bool = False,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
         download: bool = False,
+        x: float | None = None,
+        y: float | None = None,
     ) -> dict:
         """Click the first element matching ``selector`` (CSS or Playwright text=).
 
@@ -247,7 +361,26 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
 
         A native dialog the page raised is answered at once and listed under
         ``dialogs`` in the reply; ``handle_dialog`` chooses the answer beforehand.
+
+        Instead of a selector, ``x`` and ``y`` click a point: pixels of the latest
+        ``screenshot`` of this page (its ``scale`` is applied for you), for what has
+        no element to name — a canvas, a map, a drawn button. The same permissions
+        apply (declare ``submits``/``download`` as for a selector). A point that is
+        not on screen any more answers ``outside_viewport``: take a new screenshot.
         """
+        if x is not None or y is not None:
+            return await _pointer_at(
+                "click",
+                x,
+                y,
+                reason=reason,
+                submits=submits,
+                confirm=confirm,
+                timeout_ms=timeout_ms,
+                download=download,
+            )
+        if not selector:
+            return _no_target()
         page, err = await acquire_page(ctx)
         if err:
             return err
@@ -303,6 +436,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             # target is being read is this call's, not a stray that spends it.
             async with watch:
                 seen = await _read_target(everything, target)
+                await cursor.travel_to(ctx, page, target)
                 await target.click(timeout=timeout)
                 after.acted()
                 await watch.settle()
@@ -393,6 +527,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             args=args,
             timeout_ms=timeout,
         ) as done:
+            await cursor.travel_to(ctx, page, locator)
             await locator.fill(value, timeout=timeout)
             if submit:
                 await locator.press("Enter", timeout=timeout)
@@ -470,10 +605,12 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
 
     @mcp.tool
     async def hover(
-        selector: str,
+        selector: str = "",
         reason: str = "",
         confirm: bool = False,
         timeout_ms: int = DEFAULT_TIMEOUT_MS,
+        x: float | None = None,
+        y: float | None = None,
     ) -> dict:
         """Move the pointer over the first element matching ``selector``.
 
@@ -488,7 +625,22 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         the first is hovered) and what was hovered (``hovered``: tag, role, name).
         A page that navigates where no approval reaches as the pointer arrives is
         answered ``blocked_by_policy`` (see ``click``).
+
+        ``x`` and ``y`` hover a point instead: pixels of the latest ``screenshot``.
         """
+        if x is not None or y is not None:
+            return await _pointer_at(
+                "hover",
+                x,
+                y,
+                reason=reason,
+                submits=False,
+                confirm=confirm,
+                timeout_ms=timeout_ms,
+                download=False,
+            )
+        if not selector:
+            return _no_target()
         page, err = await acquire_page(ctx)
         if err:
             return err
@@ -538,6 +690,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             seen = await _read_target(everything, target)
             if "clicked" in seen:
                 seen["hovered"] = seen.pop("clicked")
+            await cursor.travel_to(ctx, page, target)
             await target.hover(timeout=timeout)
             after.acted()
             done.result = {"status": "ok", "url": page.url, **seen}
