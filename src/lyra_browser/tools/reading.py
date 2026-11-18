@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 from fastmcp import FastMCP
 
-from .. import cursor
+from .. import cursor, marks
 from ..capture import envelope, save_capture, take
 from ..challenge import hint_for, observe
 from ..context import ServerContext, acquire_page
@@ -97,6 +97,9 @@ class Element:
     states: tuple[str, ...] = ()
     # Whether any part is on screen right now; None when no geometry was given.
     in_view: bool | None = None
+    # Left, top, right, bottom in the main frame's viewport (CSS px), when the
+    # snapshot carried geometry. Not part of the line: annotated captures use it.
+    box: tuple[float, float, float, float] | None = None
 
     def line(self) -> str:
         """``aria-ref=e4 link "Home" -> /home``.
@@ -337,6 +340,7 @@ def compact_snapshot(raw: str, *, refs: bool, viewport: tuple[float, float] | No
             rect = (ox + box[0], oy + box[1], ox + box[2], oy + box[3])
             if element is not None:
                 element.in_view = _on_screen(rect, clip)
+                element.box = _clipped(clip, rect) if element.in_view else rect
             if node.role == "iframe":
                 frames.append(_Frame(depth, rect[0], rect[1], _clipped(clip, rect)))
 
@@ -398,6 +402,19 @@ async def _viewport(page) -> tuple[float, float] | None:
         return float(width), float(height)
     except Exception:  # noqa: BLE001 — ordering is a nicety; fall back to document order
         return None
+
+
+async def _marks_of(page, geo, *, full_page: bool) -> list[dict]:
+    """Marks for what is actionable on screen, from a fresh tree read of the page."""
+    root = page.locator("body").first
+    options, refs = _snapshot_options(root)
+    if not refs or "boxes" not in options:
+        return []
+    raw = await root.aria_snapshot(**options)
+    viewport = (geo[1], geo[2]) if geo else await _viewport(page)
+    tree = compact_snapshot(raw, refs=refs, viewport=viewport)
+    offset = (geo[3], geo[4]) if (full_page and geo) else (0.0, 0.0)
+    return marks.marks_from(tree.elements, offset=offset)
 
 
 # --------------------------------------------------------------------------
@@ -566,13 +583,26 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         return result
 
     @mcp.tool
-    async def screenshot(full_page: bool = False, inline: bool = False) -> dict:
+    async def screenshot(
+        full_page: bool = False, inline: bool = False, annotate: bool = False
+    ) -> dict:
         """Capture the page as a PNG file and return its path.
 
         Use it to *see* the page — layout, images, charts, anything
         ``read_page`` cannot put into words. The file is what you look at;
         ``inline=true`` adds base64 only for a client without access to this
         machine's filesystem.
+
+        ``scale`` is image pixels per CSS pixel. A point you read off the image
+        can be acted on directly: ``click(x=..., y=...)`` and ``hover(x=..., y=...)``
+        take image pixels of the latest screenshot of this page.
+
+        ``annotate=true`` draws numbered boxes on the image (not in the page) for
+        what can be acted on on screen, and returns ``marks``: one per box, with
+        ``n`` (the number drawn), ``ref`` (use ``aria-ref=<ref>`` as a selector),
+        ``role``, ``name`` and the box in CSS (``box_css``) and image (``box_px``)
+        pixels as ``[left, top, width, height]``. Like a tree read, it replaces the
+        refs of the read before it.
         """
         page, err = await acquire_page(ctx, claim=False)
         if err:
@@ -580,12 +610,45 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         # A navigation clears the overlay: the cursor is drawn again where it last
         # acted, so the picture shows what the person at the window sees.
         await cursor.redraw(ctx, page)
-        png = await take(lambda: page.screenshot(full_page=full_page))
+        found: list[dict] | None = None
+        geo = await marks.page_geometry(page)
+        if annotate:
+            found = await _marks_of(page, geo, full_page=full_page)
+        raw = await take(lambda: page.screenshot(full_page=full_page))
+        dpr = geo[0] if geo else 1.0
+        png, scale = marks.process(raw, dpr=dpr, max_edge=ctx.config.capture_max_edge, marks=found)
+        if geo is not None:
+            marks.remember(
+                page,
+                marks.Geometry(
+                    scale=scale,
+                    full_page=full_page,
+                    scroll=(geo[3], geo[4]),
+                    viewport=(geo[1], geo[2]),
+                ),
+            )
         path = save_capture(ctx.config, png, kind="page")
         ctx.audit.record(
-            "screenshot", {"full_page": full_page, "image_path": str(path), "bytes": len(png)}
+            "screenshot",
+            {
+                "full_page": full_page,
+                "annotate": annotate,
+                "image_path": str(path),
+                "bytes": len(png),
+            },
         )
-        return envelope(path, png, url=page.url, inline=inline)
+        result = envelope(path, png, url=page.url, inline=inline)
+        if geo is not None:
+            result["scale"] = round(scale, 4)
+            result["viewport"] = [geo[1], geo[2]]
+        if found is not None:
+            result["marks"] = found
+            if not found:
+                result["hint"] = (
+                    "No marks: nothing actionable with a box is on screen, or this driver "
+                    "gives no geometry. read_page(mode='tree') still lists elements."
+                )
+        return result
 
     @mcp.tool
     async def read_image(selector: str, inline: bool = False) -> dict:

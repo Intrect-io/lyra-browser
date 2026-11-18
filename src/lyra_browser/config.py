@@ -438,6 +438,9 @@ class Config:
     # agent that looks at the page on every turn would otherwise fill the disk
     # over a long session. Oldest go first; 0 disables pruning.
     capture_keep: int = 200
+    # Captures larger than this on their long edge are downscaled (``0``: never), and
+    # report the ``scale`` that maps their pixels back to CSS pixels (marks.py).
+    capture_max_edge: int = 1568
 
     # Where downloads land — derived like capture_dir, see _default_download_dir.
     download_dir: Path = field(init=False)
@@ -710,6 +713,10 @@ class Config:
             cursor_ms=_as_int(
                 _env("LYRA_BROWSER_CURSOR_MS"),
                 default=cls.__dataclass_fields__["cursor_ms"].default,
+            ),
+            capture_max_edge=_as_int(
+                _env("LYRA_BROWSER_CAPTURE_MAX_EDGE"),
+                default=cls.__dataclass_fields__["capture_max_edge"].default,
             ),
             capture_keep=_as_int(
                 _env("LYRA_BROWSER_CAPTURE_KEEP"),
