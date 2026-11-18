@@ -20,8 +20,10 @@ def test_the_cursor_cells_differ_only_in_the_cursor_and_both_hover():
     off_backend, off, off_hover = measure_compat.arm("cursor-off")
     assert on_backend == off_backend == "cdp"
     assert on_hover and off_hover
-    assert on.pop("cursor") is True and off.pop("cursor") is False
-    assert on == off
+    assert on["cursor"] is True and off["cursor"] is False
+    assert {k: v for k, v in on.items() if k != "cursor"} == {
+        k: v for k, v in off.items() if k != "cursor"
+    }
 
 
 @pytest.mark.parametrize(("cell", "backend"), [("cdp", "cdp"), ("route-master", "route")])
