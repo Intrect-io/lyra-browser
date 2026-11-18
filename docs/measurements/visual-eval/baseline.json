@@ -1,0 +1,171 @@
+{
+  "date": "2026-11-18",
+  "lyra_commit": "fff31878b9d1",
+  "chrome_version": "Google Chrome 157.0.8103.38",
+  "brain": "claude-code",
+  "model": "sonnet",
+  "model_reported": "sonnet",
+  "repeats": 2,
+  "step_budget": 25,
+  "tasks": [
+    "canvas_target",
+    "icon_toolbar",
+    "toast_code",
+    "color_state",
+    "canvas_modal",
+    "chart_value",
+    "layout_fault",
+    "changed_panel"
+  ],
+  "goals": {
+    "canvas_target": "On this page, click the green star.",
+    "icon_toolbar": "On this page, click the button whose icon is a trash can (delete).",
+    "toast_code": "Press 'Generate code'. A code appears for a moment. Type that code into the Code box and press Check.",
+    "color_state": "Press 'Next colour' until the big square is blue, then press Done.",
+    "canvas_modal": "Close the dialog that covers the page (its close button is an X), then press Continue.",
+    "chart_value": "Read the value of the 'Mar' bar in the chart, type it into the Value box and press Check.",
+    "layout_fault": "One of the four cards has text spilling out of its box. Press 'Report' on that card.",
+    "changed_panel": "Press 'Apply theme'. One of the three panels changes colour: press 'This one' on that panel."
+  },
+  "episodes": [
+    {
+      "task": "canvas_target",
+      "repeat": 0,
+      "success": false,
+      "steps": 8,
+      "seconds": 140.7,
+      "exit": "blocked"
+    },
+    {
+      "task": "icon_toolbar",
+      "repeat": 0,
+      "success": true,
+      "steps": 6,
+      "seconds": 114.8,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "toast_code",
+      "repeat": 0,
+      "success": true,
+      "steps": 10,
+      "seconds": 155.5,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "color_state",
+      "repeat": 0,
+      "success": true,
+      "steps": 13,
+      "seconds": 182.4,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "canvas_modal",
+      "repeat": 0,
+      "success": false,
+      "steps": 11,
+      "seconds": 201.4,
+      "exit": "blocked"
+    },
+    {
+      "task": "chart_value",
+      "repeat": 0,
+      "success": false,
+      "steps": 5,
+      "seconds": 90.1,
+      "exit": "partial"
+    },
+    {
+      "task": "layout_fault",
+      "repeat": 0,
+      "success": true,
+      "steps": 5,
+      "seconds": 111.3,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "changed_panel",
+      "repeat": 0,
+      "success": true,
+      "steps": 7,
+      "seconds": 110.2,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "canvas_target",
+      "repeat": 1,
+      "success": false,
+      "steps": 8,
+      "seconds": 160.9,
+      "exit": "blocked"
+    },
+    {
+      "task": "icon_toolbar",
+      "repeat": 1,
+      "success": true,
+      "steps": 6,
+      "seconds": 90.1,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "toast_code",
+      "repeat": 1,
+      "success": true,
+      "steps": 10,
+      "seconds": 133.6,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "color_state",
+      "repeat": 1,
+      "success": true,
+      "steps": 13,
+      "seconds": 176.6,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "canvas_modal",
+      "repeat": 1,
+      "success": false,
+      "steps": 11,
+      "seconds": 180.6,
+      "exit": "blocked"
+    },
+    {
+      "task": "chart_value",
+      "repeat": 1,
+      "success": false,
+      "steps": 5,
+      "seconds": 89.7,
+      "exit": "partial"
+    },
+    {
+      "task": "layout_fault",
+      "repeat": 1,
+      "success": true,
+      "steps": 5,
+      "seconds": 111.8,
+      "exit": "reached_goal"
+    },
+    {
+      "task": "changed_panel",
+      "repeat": 1,
+      "success": true,
+      "steps": 7,
+      "seconds": 111.3,
+      "exit": "reached_goal"
+    }
+  ],
+  "success_rate": 0.625,
+  "per_task": {
+    "canvas_target": 0.0,
+    "icon_toolbar": 1.0,
+    "toast_code": 1.0,
+    "color_state": 1.0,
+    "canvas_modal": 0.0,
+    "chart_value": 0.0,
+    "layout_fault": 1.0,
+    "changed_panel": 1.0
+  }
+}
