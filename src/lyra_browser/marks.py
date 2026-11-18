@@ -39,6 +39,9 @@ class Geometry:
     full_page: bool
     scroll: tuple[float, float]
     viewport: tuple[float, float]
+    # Where the image's top-left is, in CSS px of the viewport (a zoomed region starts
+    # inside it; a viewport capture at 0, 0; a full-page capture at the document's top).
+    origin: tuple[float, float] = (0.0, 0.0)
 
 
 _last: weakref.WeakKeyDictionary[Any, Geometry] = weakref.WeakKeyDictionary()
@@ -172,7 +175,8 @@ def to_viewport(page: Any, x: float, y: float, current: tuple | None) -> tuple[f
     geometry = last(page)
     if geometry is None:
         return float(x), float(y)
-    cx, cy = x / geometry.scale, y / geometry.scale
+    cx = x / geometry.scale + geometry.origin[0]
+    cy = y / geometry.scale + geometry.origin[1]
     if geometry.full_page and current is not None:
         cx -= current[3]
         cy -= current[4]

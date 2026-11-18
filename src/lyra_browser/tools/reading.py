@@ -19,6 +19,7 @@ the client attaches the image to the model's next turn. Base64 is opt-in.
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
 import json
 import re
@@ -528,6 +529,102 @@ async def _snapshot_and_compare(ctx, page, result: dict, name: str, against: str
     return result
 
 
+# How far a zoomed region is magnified at most (image px per CSS px). Chrome renders the
+# region again at that scale (Page.captureScreenshot clip.scale), so text gains real detail
+# rather than being upsampled.
+ZOOM_MAX = 4.0
+
+
+def region_to_css(geometry, region, now) -> tuple[float, float, float, float] | str:
+    """``region`` (image px of the last capture) as a viewport rect in CSS px, clipped to
+    the viewport; or why it cannot be one ("empty", "outside_viewport")."""
+    try:
+        x, y, w, h = (float(v) for v in region)
+    except (TypeError, ValueError):
+        return "malformed"
+    if w <= 0 or h <= 0:
+        return "empty"
+    left = x / geometry.scale + geometry.origin[0]
+    top = y / geometry.scale + geometry.origin[1]
+    if geometry.full_page and now is not None:
+        left -= now[3]
+        top -= now[4]
+    right, bottom = left + w / geometry.scale, top + h / geometry.scale
+    vw, vh = (now[1], now[2]) if now is not None else geometry.viewport
+    left, top = max(0.0, left), max(0.0, top)
+    right, bottom = min(vw, right), min(vh, bottom)
+    if right - left < 1 or bottom - top < 1:
+        return "outside_viewport"
+    return left, top, right - left, bottom - top
+
+
+def zoom_for(width: float, height: float, max_edge: int) -> float:
+    """The magnification of a ``width`` x ``height`` CSS px region: as large as the max
+    edge allows, up to ``ZOOM_MAX``."""
+    fit = max_edge / max(width, height) if max_edge else ZOOM_MAX
+    return max(0.05, min(ZOOM_MAX, fit))
+
+
+async def capture_region(ctx, page, region, *, inline: bool = False) -> dict:
+    """``screenshot(region=...)``: a part of the last capture, rendered again larger."""
+    last = marks.last(page)
+    if last is None:
+        return {
+            "status": "error",
+            "reason": "region is in pixels of the latest screenshot of this page: take one first.",
+        }
+    now = await marks.page_geometry(page)
+    rect = region_to_css(last, region, now)
+    if isinstance(rect, str):
+        reasons = {
+            "malformed": "region is [x, y, width, height] in pixels of the latest screenshot.",
+            "empty": "region has no area: width and height must be above 0.",
+            "outside_viewport": "That region is not on screen now. Take a new screenshot (the "
+            "page may have scrolled) and use its pixels.",
+        }
+        ctx.audit.record("screenshot", {"region": list(region or [])}, status=rect)
+        return {"status": rect, "region": region, "reason": reasons[rect]}
+    left, top, width, height = rect
+    await cursor.redraw(ctx, page)
+    zoom = zoom_for(width, height, ctx.config.capture_max_edge)
+    scroll = (now[3], now[4]) if now is not None else last.scroll
+    reply = await take(
+        lambda: cursor.send_cdp(
+            page,
+            "Page.captureScreenshot",
+            {
+                "format": "png",
+                # Document coordinates (measured: the clip ignores the scroll otherwise).
+                "clip": {
+                    "x": left + scroll[0],
+                    "y": top + scroll[1],
+                    "width": width,
+                    "height": height,
+                    "scale": zoom,
+                },
+            },
+        )
+    )
+    png = base64.b64decode((reply or {}).get("data", ""))
+    png, scale = marks.process(png, css_width=width, max_edge=ctx.config.capture_max_edge)
+    viewport = (now[1], now[2]) if now is not None else last.viewport
+    marks.remember(
+        page,
+        marks.Geometry(
+            scale=scale, full_page=False, scroll=scroll, viewport=viewport, origin=(left, top)
+        ),
+    )
+    path = save_capture(ctx.config, png, kind="region")
+    box = [round(left, 1), round(top, 1), round(width, 1), round(height, 1)]
+    ctx.audit.record(
+        "screenshot",
+        {"region": list(region), "region_css": box, "image_path": str(path), "bytes": len(png)},
+    )
+    result = envelope(path, png, url=page.url, inline=inline)
+    result.update(scale=round(scale, 4), origin=box[:2], region_css=box, viewport=list(viewport))
+    return result
+
+
 async def _shoot(page, full_page: bool) -> bytes:
     """The page as PNG, without writing to it.
 
@@ -727,6 +824,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         annotate: bool = False,
         name: str = "",
         compare_to: str = "",
+        region: list[float] | None = None,
     ) -> dict:
         """Capture the page as a PNG file and return its path.
 
@@ -746,6 +844,11 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         pixels as ``[left, top, width, height]``. Like a tree read, it replaces the
         refs of the read before it.
 
+        ``region=[x, y, width, height]`` zooms: pixels of the latest screenshot, rendered
+        again up to 4x larger (small text, a dense chart, a few-pixel fault). Its own
+        ``scale`` and ``origin`` come back, and click/hover x, y then mean pixels of
+        this zoomed image.
+
         ``name="before"`` keeps this capture under that name; ``compare_to="before"``
         captures again and answers ``diff``: ``changed``, ``ratio`` (share of pixels) and
         ``boxes`` around what changed, outlined on the attached image. For checking a
@@ -755,6 +858,10 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         page, err = await acquire_page(ctx, claim=False)
         if err:
             return err
+        if region is not None:
+            if name or compare_to:
+                return {"status": "error", "reason": "region does not go with name/compare_to."}
+            return await capture_region(ctx, page, region, inline=inline)
         if (name or compare_to) and (full_page or annotate):
             return {
                 "status": "error",
