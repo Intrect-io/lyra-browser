@@ -164,9 +164,10 @@ async def detail(ctx, tools, page) -> None:
     expect(density >= 2.0, "the zoom has >= 2x the downscaled capture's density", density)
     seen_full = transitions(crop, crop.height // 2)
     seen_zoom = transitions(zimg, zimg.height // 2)
+    # 120 CSS px of 1 px stripes are 60 dark/light pairs: 119 edges when every one shows.
     expect(
-        seen_zoom >= 200 and seen_zoom > 2 * seen_full,
-        "1 px stripes blurred in the downscaled capture are resolved in the zoom",
+        seen_zoom >= 110 and seen_full <= 0.75 * seen_zoom,
+        "1 px stripes lost in the downscaled capture are all resolved in the zoom",
         (seen_full, seen_zoom),
     )
 
