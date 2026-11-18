@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
+from .. import cursor
 from ..approval import TakeoverActive
 from ..context import ServerContext, acquire_page, claim_session
 from ..origin import parse_origin
@@ -112,6 +113,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         # Last, once every check has passed: from here the window's navigations
         # are the user's (see CollaborationState.user_turn).
         ctx.collab.hand_to_user()
+        await cursor.hide(ctx, page)
         ctx.audit.record("ask_user_to_do", {"instruction": instruction, "selector": selector})
         return {
             "status": "awaiting_user",
@@ -152,6 +154,8 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             return lost.envelope()
         ctx.collab.takeover = True
         ctx.collab.takeover_reason = reason
+        # The window is the user's now: the agent's pointer leaves it.
+        await cursor.hide_current(ctx)
         ctx.audit.record("request_takeover", {"reason": reason})
         return {
             "status": "takeover_active",

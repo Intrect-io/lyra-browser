@@ -37,6 +37,7 @@ from pathlib import Path
 
 from fastmcp import FastMCP
 
+from .. import cursor
 from ..approval import TakeoverActive
 from ..context import ServerContext, acquire_page
 from ..permission import Capability
@@ -577,6 +578,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             return denied
         args: dict = {"selector": selector}
         async with released(ctx, bought):
+            await cursor.travel_to(ctx, page, target)
             if value:
                 args["value"] = value
                 await target.select_option(value=value)

@@ -26,6 +26,7 @@ import asyncio
 
 from fastmcp import FastMCP
 
+from .. import cursor
 from ..approval import TakeoverActive
 from ..context import ServerContext, acquire_page
 from ..downloads import KEYBOARD_SETTLE_SCALE
@@ -303,6 +304,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             # target is being read is this call's, not a stray that spends it.
             async with watch:
                 seen = await _read_target(everything, target)
+                await cursor.travel_to(ctx, page, target)
                 await target.click(timeout=timeout)
                 after.acted()
                 await watch.settle()
@@ -393,6 +395,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             args=args,
             timeout_ms=timeout,
         ) as done:
+            await cursor.travel_to(ctx, page, locator)
             await locator.fill(value, timeout=timeout)
             if submit:
                 await locator.press("Enter", timeout=timeout)
@@ -538,6 +541,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             seen = await _read_target(everything, target)
             if "clicked" in seen:
                 seen["hovered"] = seen.pop("clicked")
+            await cursor.travel_to(ctx, page, target)
             await target.hover(timeout=timeout)
             after.acted()
             done.result = {"status": "ok", "url": page.url, **seen}
