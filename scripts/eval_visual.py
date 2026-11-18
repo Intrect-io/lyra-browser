@@ -72,10 +72,17 @@ async def _play(task: str, correct: bool, *, page, tools, sol: dict, base: str, 
         r = await click(selector=selector)
         assert r.get("status") == "ok", (selector, r)
 
+    async def press_at(css_x: float, css_y: float) -> None:
+        # Through the tool, as an agent would: pixels of the latest screenshot.
+        shot = await tools["screenshot"]()
+        scale = shot.get("scale", 1.0)
+        r = await click(x=css_x * scale, y=css_y * scale)
+        assert r.get("status") == "ok", r
+
     if task == "canvas_target":
         target = sol["shapes"][0] if correct else sol["shapes"][1]
         x0, y0 = await _canvas_origin(page, "#c")
-        await page.mouse.click(x0 + target["x"], y0 + target["y"])
+        await press_at(x0 + target["x"], y0 + target["y"])
     elif task == "icon_toolbar":
         i = sol["icons"].index("trash")
         await press(f'#bar button[data-i="{i if correct else (i + 1) % len(sol["icons"])}"]')
@@ -98,13 +105,13 @@ async def _play(task: str, correct: bool, *, page, tools, sol: dict, base: str, 
         cx = bx + 26 if sol["corner"][1] == "l" else bx + 460 - 26
         cy = by + 26 if sol["corner"][0] == "t" else by + 260 - 26
         if correct:
-            await page.mouse.click(cx, cy)
+            await press_at(cx, cy)
             await asyncio.sleep(0.2)
             await press("#cont")
         else:
             # The dialog is still up: a press where Continue is lands on the canvas.
             bx0, by0 = await _canvas_origin(page, "#cont")
-            await page.mouse.click(bx0 + 10, by0 + 8)
+            await press_at(bx0 + 10, by0 + 8)
     elif task == "chart_value":
         want = sol["values"][sol["months"].index(sol["target"])]
         r = await type_text(selector="#val", value=str(want if correct else want + 1))

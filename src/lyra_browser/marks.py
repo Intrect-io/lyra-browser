@@ -26,7 +26,8 @@ MAX_MARKS = 80
 
 _GEOMETRY_JS = (
     "[window.devicePixelRatio || 1, window.innerWidth, window.innerHeight,"
-    " window.scrollX, window.scrollY]"
+    " window.scrollX, window.scrollY,"
+    " Math.max(document.documentElement.scrollWidth, window.innerWidth)]"
 )
 
 
@@ -43,12 +44,11 @@ class Geometry:
 _last: weakref.WeakKeyDictionary[Any, Geometry] = weakref.WeakKeyDictionary()
 
 
-async def page_geometry(page: Any) -> tuple[float, float, float, float, float] | None:
-    """(device pixel ratio, viewport width, height, scrollX, scrollY), or None."""
+async def page_geometry(page: Any) -> tuple[float, ...] | None:
+    """(device pixel ratio, viewport width, height, scrollX, scrollY, document width)."""
     try:
         got = await page.evaluate(_GEOMETRY_JS)
-        dpr, w, h, sx, sy = (float(v) for v in got)
-        return dpr, w, h, sx, sy
+        return tuple(float(v) for v in got)
     except Exception:  # noqa: BLE001 — a page that cannot say keeps scale unknown
         return None
 
@@ -70,15 +70,20 @@ def last(page: Any) -> Geometry | None:
 def process(
     png: bytes,
     *,
-    dpr: float,
+    css_width: float | None,
     max_edge: int,
     marks: list[dict] | None = None,
+    dpr: float = 1.0,
 ) -> tuple[bytes, float]:
     """Downscale ``png`` to ``max_edge`` and draw ``marks``; return it and its scale.
 
+    The scale is measured, not assumed: the image's width over the CSS width it shows
+    (``css_width``). The page's ``devicePixelRatio`` is not enough: Playwright captures
+    at its own emulated ratio whatever the page reports (measured: an image 1280 px
+    wide while the page said 2). ``dpr`` is the fallback when no width is known.
     ``marks`` carry ``n`` and ``box_css`` (left, top, width, height in CSS px of the
     captured area); each gets ``box_px`` filled in. A PNG Pillow cannot read is returned
-    as it is with scale ``dpr``.
+    as it is.
     """
     try:
         from PIL import Image, ImageDraw, ImageFont
@@ -89,12 +94,12 @@ def process(
         img.load()
     except Exception:  # noqa: BLE001
         return png, dpr
-    scale = dpr
     w, h = img.size
+    scale = w / css_width if css_width else dpr
     if max_edge and max(w, h) > max_edge:
         ratio = max_edge / max(w, h)
         img = img.resize((max(1, round(w * ratio)), max(1, round(h * ratio))), Image.LANCZOS)
-        scale = dpr * ratio
+        scale *= ratio
     if marks:
         img = img.convert("RGB")
         draw = ImageDraw.Draw(img)

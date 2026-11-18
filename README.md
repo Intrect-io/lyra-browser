@@ -465,6 +465,33 @@ does not fill the disk. The audit records the path and size, never the pixels.
 `read_image` fetches nothing — it captures what the element renders, so no
 request leaves the browser and nothing is gated.
 
+### Marks, scale and acting on a point
+
+`screenshot(annotate=true)` draws numbered boxes on the image for what can be acted on on
+screen and returns `marks`: per box `n` (the number drawn), `ref` (use `aria-ref=<ref>` as
+a selector), `role`, `name`, and the box as `[left, top, width, height]` in CSS pixels
+(`box_css`) and image pixels (`box_px`). The boxes come from the same tree `read_page(mode="tree")`
+reads, so a mark and a tree line name the same element; like a tree read, it replaces the
+refs of the read before it. They are drawn on the PNG (Pillow), never in the page.
+
+Every capture reports `scale`, image pixels per CSS pixel, measured from the image (the
+page's `devicePixelRatio` is not always what the driver captured at). Captures longer than
+`LYRA_BROWSER_CAPTURE_MAX_EDGE` (1568 px) are downscaled first. `click(x=, y=)` and
+`hover(x=, y=)` take pixels of the latest screenshot of the page and divide by its scale,
+for what has no element to name: a canvas, a map, a drawn button. They ask for the same
+permissions as a selector click (`submits=true`, `download=true`), the enforcement layer
+judges what they set off, and a point that is no longer on screen answers
+`outside_viewport`.
+
+Measured 2026-11-18 (Chrome 157, `scripts/verify_visual_e2e.py`, native and Playwright
+1.65.2 headless, native headful): a mark for each of the 8 controls on the test page, every
+box matching its element's rect with IoU >= 0.9, every ref clicking its own element, the
+page's `MutationObserver` silent while annotating; a dot drawn only on a canvas hit within
+2 CSS px at scale 1, downscaled to 1000 px, and at a device pixel ratio of 2; a form sent
+by a coordinate click without `submits=true` stopped before it reached the server.
+Playwright's own screenshot writes a style on the page's inputs to hide the caret (2
+mutations per capture, measured); lyra asks it not to (`caret="initial"`).
+
 ### The virtual cursor
 
 Before `click`, `hover`, `type_text` and `select_option` act, a cursor travels from where
@@ -1052,6 +1079,7 @@ throwaway keyring.
 | `LYRA_BROWSER_OWNER_IDLE_TIMEOUT` | `900` | Seconds a session may hold the browser without using it. Handing it on closes the window. |
 | `LYRA_BROWSER_CAPTURE_DIR` | — | Where `screenshot`/`read_image` write PNGs. Default: hermes `$HERMES_HOME/cache/browser` (where Hermes' vision may read), else `<data_dir>/captures`. |
 | `LYRA_BROWSER_CAPTURE_KEEP` | `200` | Captures kept on disk; oldest are deleted first. `0` keeps all. |
+| `LYRA_BROWSER_CAPTURE_MAX_EDGE` | `1568` | Captures longer than this on either edge are downscaled; `scale` in the reply says by how much. `0` keeps full size. |
 | `LYRA_BROWSER_CURSOR` | on | The virtual cursor (see Seeing the page): a pointer drawn with the DevTools overlay that travels to each click, hover, typed field and picked option, the real mouse moving along the same path. `off` removes both. |
 | `LYRA_BROWSER_CURSOR_MS` | `300` | How long the cursor takes to travel to a target. |
 | `LYRA_BROWSER_DOWNLOAD_DIR` | — | Where declared downloads are saved. Default `<data_dir>/downloads`. |

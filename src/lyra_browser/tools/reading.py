@@ -404,6 +404,20 @@ async def _viewport(page) -> tuple[float, float] | None:
         return None
 
 
+async def _shoot(page, full_page: bool) -> bytes:
+    """The page as PNG, without writing to it.
+
+    Playwright's default ``caret="hide"`` sets a style on the page's inputs for the
+    capture (measured: 2 attribute mutations per screenshot on a page with an input),
+    which the page's scripts can see; ``initial`` leaves them alone. The native driver
+    writes nothing either way. A driver without the argument gets the plain call.
+    """
+    try:
+        return await page.screenshot(full_page=full_page, caret="initial")
+    except TypeError:
+        return await page.screenshot(full_page=full_page)
+
+
 async def _marks_of(page, geo, *, full_page: bool) -> list[dict]:
     """Marks for what is actionable on screen, from a fresh tree read of the page."""
     root = page.locator("body").first
@@ -614,9 +628,15 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         geo = await marks.page_geometry(page)
         if annotate:
             found = await _marks_of(page, geo, full_page=full_page)
-        raw = await take(lambda: page.screenshot(full_page=full_page))
-        dpr = geo[0] if geo else 1.0
-        png, scale = marks.process(raw, dpr=dpr, max_edge=ctx.config.capture_max_edge, marks=found)
+        raw = await take(lambda: _shoot(page, full_page))
+        css_width = (geo[5] if full_page else geo[1]) if geo else None
+        png, scale = marks.process(
+            raw,
+            css_width=css_width,
+            dpr=geo[0] if geo else 1.0,
+            max_edge=ctx.config.capture_max_edge,
+            marks=found,
+        )
         if geo is not None:
             marks.remember(
                 page,
