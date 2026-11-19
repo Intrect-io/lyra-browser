@@ -598,7 +598,8 @@ id. The page's `MutationObserver` records 0 mutations; a scan of that page (abou
 took 19-22 ms at the median (N=20), and the page script stops itself after 3.5 s
 (`truncated: "time"`) before the tool's 5 s wait runs out. Three review rounds (each finding
 verified by separate reviewers trying to refute it) found 31, 16 and 11 cases; each one that
-held is pinned in the gate or the unit tests.
+held is fixed, and all but two (html/body overflow on a scrolled page, the time budget while
+gathering on a huge page) are pinned in the gate or the unit tests.
 
 `lyra-uat` personas do not get `inspect_layout` by default (`DEFAULT_TOOLS`): the visual eval
 measures what a model sees, and a DOM reading of contrast and overlap would answer its v2
