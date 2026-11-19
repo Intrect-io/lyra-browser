@@ -130,6 +130,13 @@ draft account 1234 secret</textarea>
  Subscribe</div>
 <div class="card" id="c-pre2"><pre id="pre2" style="width:180px;overflow-x:auto;overflow-y:hidden;
  margin:0">a long line of code that scrolls sideways</pre></div>
+<div class="card" id="c-btnlink"><p id="btnlinkp">Card body text</p>
+ <a href="#y" id="btnlink" style="background:#06c;color:#fff;padding:4px 8px">Go</a>
+ <style>#btnlink::after{content:'';position:absolute;inset:0;z-index:1}</style></div>
+<div class="card" id="c-caption" style="padding:0">
+ <canvas id="capimg" width="218" height="108" style="position:absolute;left:0;top:0"></canvas>
+ <div style="position:relative;pointer-events:none"><h3 id="caption"
+ style="margin:30px 12px;color:#fff">Caption</h3></div></div>
 <p id="underfixed" style="position:absolute;left:30px;top:calc(100vh - 35px);margin:0">
  Under the bar</p>
 <div style="position:fixed;left:0;bottom:0;width:100%;height:50px;background:#333"></div>
@@ -143,6 +150,8 @@ document.getElementById('pw').value = 'hunter2-secret';
 const cb = document.getElementById('chatbtn').getBoundingClientRect();
 const bub = document.getElementById('bubble');
 bub.style.left = (cb.left - 5) + 'px'; bub.style.top = (cb.top - 8) + 'px';
+const ci = document.getElementById('capimg').getContext('2d');
+ci.fillStyle = '#111'; ci.fillRect(0, 0, 218, 108);
 const dc = document.getElementById('decoimg').getContext('2d');
 dc.fillStyle = '#111'; dc.fillRect(0, 0, 218, 108);
 const s = {muts: 0};
@@ -289,6 +298,14 @@ async def run_mode(base: str, *, headless: bool) -> None:
         expect(not of(found, "low_contrast", "badge"), "text on a ::before fill is not judged")
         expect(not of(found, "low_contrast", "check"), "a checkbox has no text to judge")
         expect(not of(found, "clipped", "pre2"), "a box that scrolls sideways is not clipping")
+        expect(
+            not of(found, "covered", "btnlinkp"),
+            "a filled link's transparent ::after over its card is not a cover",
+        )
+        expect(
+            not of(found, "low_contrast", "caption"),
+            "a pointer-events:none caption over a dark canvas is not judged",
+        )
         large = await tools["inspect_layout"](selector="#c-large")
         expect(
             large["findings"] == [] and large["contrast_checked"] >= 1,

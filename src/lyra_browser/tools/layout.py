@@ -191,8 +191,10 @@ _LAYOUT_FN = r"""(root, arg) => {
       const last = below.length ? below[below.length - 1] : inside[inside.length - 1];
       return last && last[3] >= 1 && (!g || below.length);
     };
-    const chain = i < 0 ? [] : stack.slice(i + 1).filter((n) => !within(el, n));
-    if (i < 0) for (let n = el; n && n.nodeType === 1; n = parentOf(n)) chain.push(n);
+    // Not in the hit-test stack (pointer-events: none, inherited too): what is painted
+    // under it cannot be read from the page's paint order, so it is unknown.
+    if (i < 0) return null;
+    const chain = stack.slice(i + 1).filter((n) => !within(el, n));
     if (!take(el)) return null;
     for (const n of chain) {
       if (n === el) continue;
@@ -328,10 +330,14 @@ _LAYOUT_FN = r"""(root, arg) => {
   const paints = (n, x, y) => {
     const cs = style(n);
     if (groupOf(n).o < 0.1 || cs.visibility === 'hidden') return false;  // invisible overlay
-    if (isMedia(n) || n.matches('input, select, textarea, button')) return true;
-    if (imaged(cs)) return true;
-    const bg = rgba(cs.backgroundColor);
-    if (bg && bg[3] > 0.05) return true;
+    // Its own box paints only inside that box: a hit outside it is its ::before/::after
+    // (a stretched link's click area), judged below.
+    if (contains(n.getBoundingClientRect(), x, y)) {
+      if (isMedia(n) || n.matches('input, select, textarea, button')) return true;
+      if (imaged(cs)) return true;
+      const bg = rgba(cs.backgroundColor);
+      if (bg && bg[3] > 0.05) return true;
+    }
     for (const pseudo of ['::before', '::after']) {
       const ps = style(n, pseudo);
       if (ps.content && ps.content !== 'none' && ps.content !== 'normal') {

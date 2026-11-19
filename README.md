@@ -568,8 +568,8 @@ a gradient is counted (`unknown_background`), not guessed. Not faults, by design
 not visible (scrolled out of its scroller, clipped away, `opacity: 0`, visually-hidden
 `sr-only` text), text under a sticky element or a bar fixed along a viewport edge (counted,
 `under_fixed`), a transparent
-click-catcher over a card, and text that cannot be hit-tested (`pointer-events: none`,
-counted). Open shadow roots are scanned; `selector` takes CSS or the other tools' `aria-ref=`,
+click-catcher over a card, and text that cannot be hit-tested (`pointer-events: none`: its
+background counts as unknown, its cover check is skipped and counted). Open shadow roots are scanned; `selector` takes CSS or the other tools' `aria-ref=`,
 `text=` and `role=` forms. Each finding has `box_css` and, when there is a screenshot of the
 page, `box_px` for `screenshot(region=...)`. It only reads: no permission, nothing written to
 the page, and a control is labelled by its placeholder, `aria-label` or type, never by the
@@ -592,12 +592,13 @@ scroller, `sr-only` and faded-out text, a line that scrolls inside a `pre`, a ch
 parent's text, a card under a transparent stretched link, and text under a bar fixed to the
 viewport's edge (counted), text over a `pointer-events: none` colour scrim or a `::before`
 fill (unknown), the button beside an ellipsis, a float beside wrapped text, an invisible file
-input over its label, a checkbox, and a box that scrolls sideways. Element descriptors stay
+input over its label, a checkbox, a box that scrolls sideways, a filled link's transparent `::after`
+over its card, and a `pointer-events: none` caption over a dark canvas (unknown). Element descriptors stay
 under 200 characters even for a 300-char
 id. The page's `MutationObserver` records 0 mutations; a scan of that page (about 50 cards)
-took 19-22 ms at the median (N=20), and the page script stops itself after 3.5 s
-(`truncated: "time"`) before the tool's 5 s wait runs out. Three review rounds (each finding
-verified by separate reviewers trying to refute it) found 31, 16 and 11 cases; each one that
+took 13-15 ms at the median (N=20), and the page script stops itself after 3.5 s
+(`truncated: "time"`) before the tool's 5 s wait runs out. Four review rounds (each finding
+verified by separate reviewers trying to refute it) found 31, 16, 11 and 2 cases; each one that
 held is fixed, and all but two (html/body overflow on a scrolled page, the time budget while
 gathering on a huge page) are pinned in the gate or the unit tests.
 
