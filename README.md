@@ -575,18 +575,26 @@ the page, and a control is labelled by its placeholder, `aria-label` or type, ne
 value typed into it.
 
 Measured 2026-11-19 with Chrome 157.0.8103.38 (`scripts/verify_layout_e2e.py`, native and
-Playwright 1.65.2, headless and headful), on a page with planted faults and look-alikes:
-found are `#c2c2c2` text on `#fafafa` (ratio under 2), pale text on an oklch background, a
-pale placeholder, faint text inside a shadow root, text cut off by `overflow: hidden`, text
-spilling out of its card, text with a box over half of it, a button under an overlay and a
-password field under an overlay (its value not in the reply); not reported are `#222` text,
-26 px text at 3.5:1 (checked and passed), white text on an oklch dark background, a disabled
-control, text over a dark canvas and on a gradient (counted as unknown), rows scrolled out of
-a scroller, `sr-only` and faded-out text, a line that scrolls inside a `pre`, a child over
-its parent's text, a card under a transparent stretched link, and text under a fixed bar
-(counted). The page's `MutationObserver` records 0 mutations; a scan of that page (about 30
-cards) took 9-11 ms at the median (N=20). Before this, a review of a first version found 31
-false-positive and false-negative cases, which the list above now pins.
+Playwright 1.65.2, headless and headful, one 1280x1400 viewport), on a page with planted
+faults and look-alikes. Found: `#c2c2c2` text on `#fafafa` (ratio under 2), pale text on an
+oklch background, a pale placeholder, faint text inside a shadow root, white on black inside
+a half-faded card (opacity applied once, to text and background alike), an absolutely
+positioned tooltip that escapes a clipping card, a visible crop; text cut off by
+`overflow: hidden` sideways and below its box, text cut off by an `overflow-x: hidden`
+parent, text spilling out of its card; text with a box over it, text under an opaque modal
+whose transparent inner box is what the hit-test returns, a button under an overlay, a button
+under a fixed chat bubble, and a password field and a textarea under overlays (neither's
+content in the reply). Not reported: `#222` text, 26 px text at 3.5:1 (checked and passed),
+white on an oklch dark background, a disabled control, text over a dark canvas (also one with
+`pointer-events: none`) and on a gradient (counted as unknown), rows scrolled out of a
+scroller, `sr-only` and faded-out text, a line that scrolls inside a `pre`, a child over its
+parent's text, a card under a transparent stretched link, and text under a bar fixed to the
+viewport's edge (counted). Element descriptors stay under 200 characters even for a 300-char
+id. The page's `MutationObserver` records 0 mutations; a scan of that page (about 40 cards)
+took 8-10 ms at the median (N=20), and the page script stops itself after 3.5 s
+(`truncated: "time"`) before the tool's 5 s wait runs out. Two review rounds (each finding
+verified by a separate reviewer trying to refute it) found 31 and then 16 cases; each one that
+held is pinned in the gate or the unit tests.
 
 `lyra-uat` personas do not get `inspect_layout` by default (`DEFAULT_TOOLS`): the visual eval
 measures what a model sees, and a DOM reading of contrast and overlap would answer its v2

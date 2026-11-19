@@ -39,15 +39,18 @@ from ..origin import loggable_url
 _READ_BUDGET_S = 5.0
 MAX_FINDINGS = 50
 MAX_ELEMENTS = 4000
+# The page script stops itself before the tool gives up waiting, and says so.
+_SCAN_BUDGET_MS = 3500
 
 # The scan, given the element to scan under (``root``) and its options.
 _LAYOUT_FN = r"""(root, arg) => {
-  const {cap, maxElements} = arg;
+  const {cap, maxElements, budgetMs} = arg;
+  const started = performance.now();
   const vw = innerWidth, vh = innerHeight;
   const findings = [];
   const counts = {scanned: 0, unknown_background: 0, under_fixed: 0, not_hit_testable: 0,
     contrast_checked: 0};
-  let truncated = false;
+  let truncated = null;
 
   // Any CSS colour to sRGB, through a canvas that is never attached to the page.
   const paint = new OffscreenCanvas(1, 1).getContext('2d', {willReadFrequently: true});
@@ -82,22 +85,40 @@ _LAYOUT_FN = r"""(root, arg) => {
     const a = top[3];
     return [0, 1, 2].map((i) => top[i] * a + under[i] * (1 - a)).concat([1]);
   };
-  const style = (n, pseudo) => getComputedStyle(n, pseudo);
+  const mix = (a, b, t) => [0, 1, 2].map((i) => a[i] * t + b[i] * (1 - t)).concat([1]);
+  const styles = new Map();
+  const style = (n, pseudo) => {
+    if (pseudo) return getComputedStyle(n, pseudo);
+    let cs = styles.get(n);
+    if (!cs) { cs = getComputedStyle(n); styles.set(n, cs); }
+    return cs;
+  };
   const parentOf = (n) => n.parentElement || (n.parentNode && n.parentNode.host) || null;
   const within = (outer, inner) => {  // inner is outer or inside it, across shadow roots
     for (let n = inner; n; n = parentOf(n)) if (n === outer) return true;
     return false;
   };
-  const opacity = (el) => {
-    let o = 1;
-    for (let n = el; n && n.nodeType === 1; n = parentOf(n)) o *= Number(style(n).opacity);
-    return o;
+  const clipText = (t, n) => (t.length > n ? t.slice(0, n) + '…' : t);
+  // The outermost ancestor-or-self that fades: its opacity applies to the text and to
+  // the backgrounds inside it alike, once.
+  const groupOf = (el) => {
+    let g = null, o = 1;
+    for (let n = el; n && n.nodeType === 1; n = parentOf(n)) {
+      const v = Number(style(n).opacity);
+      if (v < 1) { g = n; o *= v; }
+    }
+    return {g, o};
   };
-  // The page canvas: white, or the dark one Chrome paints for a dark color-scheme.
+  const opaqueBg = (n) => {
+    const c = rgba(style(n).backgroundColor);
+    return c && c[3] >= 1 ? c : null;
+  };
+  // The page canvas: html's background, else body's (it propagates), else white or the
+  // dark canvas Chrome paints for a dark color-scheme.
   const canvas = (() => {
     const top = document.documentElement;
-    const bg = rgba(style(top).backgroundColor);
-    if (bg && bg[3] >= 1) return bg;
+    const own = opaqueBg(top) || (document.body && opaqueBg(document.body));
+    if (own) return own;
     const scheme = style(top).colorScheme || '';
     const dark = /dark/.test(scheme) &&
       (!/light/.test(scheme) || matchMedia('(prefers-color-scheme: dark)').matches);
@@ -105,40 +126,77 @@ _LAYOUT_FN = r"""(root, arg) => {
   })();
   const MEDIA = new Set(['IMG', 'VIDEO', 'CANVAS', 'IFRAME', 'OBJECT', 'EMBED', 'PICTURE']);
   const isMedia = (n) => MEDIA.has(n.tagName) || n instanceof SVGSVGElement;
-  // What is painted behind ``el`` at (x, y): the page's own paint order there, top
-  // down, from just below el. An image, a video, a canvas or a gradient on the way makes
-  // it unknown.
-  const background = (el, x, y) => {
+  const imaged = (cs) => cs.backgroundImage && cs.backgroundImage !== 'none';
+  const contains = (r, x, y) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+
+  const all = [];
+  const gather = (node) => {
+    for (const el of node.querySelectorAll('*')) {
+      all.push(el);
+      if (el.shadowRoot) gather(el.shadowRoot);
+    }
+  };
+  all.push(root);
+  if (root.shadowRoot) gather(root.shadowRoot);
+  gather(root);
+  // Layers that hit-testing cannot see (pointer-events: none) but that paint: a
+  // decorative image or scrim behind a heading. elementsFromPoint leaves them out.
+  const inert = [];
+  for (const n of all) {
+    const r = n.getBoundingClientRect();
+    if (r.width < 1 || r.height < 1 || r.right < 0 || r.bottom < 0 || r.left > vw || r.top > vh) {
+      continue;
+    }
+    const cs = style(n);
+    if (cs.pointerEvents !== 'none' || cs.visibility === 'hidden') continue;
+    const bg = rgba(cs.backgroundColor);
+    if (isMedia(n) || imaged(cs) || (bg && bg[3] > 0.05)) inert.push({n, r});
+  }
+
+  // What is painted behind ``el`` at (x, y), as the page orders it: ``inside`` the
+  // fading group (if any) and ``below`` it. null when an image, video, canvas or
+  // gradient is in the way: then it cannot be computed.
+  const background = (el, x, y, g) => {
+    for (const {n, r} of inert) {
+      if (!within(el, n) && !within(n, el) && contains(r, x, y)) {
+        const cs = style(n);
+        if (isMedia(n) || imaged(cs)) return null;
+      }
+    }
     const scope = el.getRootNode().elementsFromPoint ? el.getRootNode() : document;
     const stack = scope.elementsFromPoint(x, y);
     let i = stack.indexOf(el);
-    const layers = [];
+    const inside = [], below = [];
     const take = (n) => {
       const cs = style(n);
-      if (isMedia(n) || (cs.backgroundImage && cs.backgroundImage !== 'none')) return false;
+      if (isMedia(n) || imaged(cs)) return false;
       const c = rgba(cs.backgroundColor);
-      if (c && c[3] > 0) layers.push([c[0], c[1], c[2], c[3] * opacity(n)]);
+      if (c && c[3] > 0) {
+        if (g && within(g, n)) inside.push(c);
+        else below.push([c[0], c[1], c[2], c[3] * groupOf(n).o]);
+      }
       return true;
     };
-    const opaque = () => layers.length && layers[layers.length - 1][3] >= 1;
-    if (i < 0) {
-      // Not hit-testable at that point: fall back to its own ancestors.
-      for (let n = el; n && n.nodeType === 1 && !opaque(); n = parentOf(n)) {
-        if (!take(n)) return null;
-      }
-    } else {
-      if (!take(el)) return null;
-      for (i += 1; i < stack.length && !opaque(); i++) {
-        const n = stack[i];
-        if (within(el, n)) continue;
-        if (!take(n)) return null;
-      }
+    const opaque = () => {
+      const last = below.length ? below[below.length - 1] : inside[inside.length - 1];
+      return last && last[3] >= 1 && (!g || below.length);
+    };
+    const chain = i < 0 ? [] : stack.slice(i + 1).filter((n) => !within(el, n));
+    if (i < 0) for (let n = el; n && n.nodeType === 1; n = parentOf(n)) chain.push(n);
+    if (!take(el)) return null;
+    for (const n of chain) {
+      if (n === el) continue;
+      if (opaque()) break;
+      if (!take(n)) return null;
     }
-    let colour = canvas;
-    for (let k = layers.length - 1; k >= 0; k--) colour = over(layers[k], colour);
-    return colour;
+    let low = canvas;
+    for (let k = below.length - 1; k >= 0; k--) low = over(below[k], low);
+    let high = low;
+    for (let k = inside.length - 1; k >= 0; k--) high = over(inside[k], high);
+    return {inside: high, below: low};
   };
   const ownText = (el) => {
+    if (el.tagName === 'TEXTAREA') return '';  // its text node is its value
     let t = '';
     for (const n of el.childNodes) if (n.nodeType === 3) t += n.nodeValue;
     return t.replace(/\s+/g, ' ').trim();
@@ -158,21 +216,22 @@ _LAYOUT_FN = r"""(root, arg) => {
     }
     return b;
   };
-  const describe = (el) => {
+  const describe = (el, depth = 0) => {
     let s = el.tagName.toLowerCase();
-    if (el.id) return s + '#' + el.id;
-    const cls = [...el.classList].slice(0, 2).join('.');
+    if (el.id) return s + '#' + clipText(el.id, 40);
+    const cls = [...el.classList].slice(0, 2).map((c) => clipText(c, 30)).join('.');
     if (cls) s += '.' + cls;
     const p = parentOf(el);
-    if (p && p.nodeType === 1) {
-      const same = [...p.children].filter((c) => c.tagName === el.tagName);
+    if (p && p.nodeType === 1 && depth < 2) {
+      const siblings = el.parentNode && el.parentNode.children ? [...el.parentNode.children] : [];
+      const same = siblings.filter((c) => c.tagName === el.tagName);
       if (same.length > 1) s += ':nth-of-type(' + (same.indexOf(el) + 1) + ')';
-      return describe(p).split(' > ').slice(-2).join(' > ') + ' > ' + s;
+      return describe(p, depth + 1) + ' > ' + s;
     }
     return s;
   };
   const add = (finding) => {
-    if (findings.length >= cap) { truncated = true; return; }
+    if (findings.length >= cap) { truncated = truncated || 'findings'; return; }
     findings.push(finding);
   };
   const box = (b) =>
@@ -183,92 +242,130 @@ _LAYOUT_FN = r"""(root, arg) => {
   const area = (b) => Math.max(0, b.r - b.l) * Math.max(0, b.b - b.t);
   const VIEW = {l: 0, t: 0, r: vw, b: vh};
   const CUT = ['hidden', 'clip'];
-  const scrolls = (cs) => ['auto', 'scroll'].includes(cs.overflowX) ||
-    ['auto', 'scroll'].includes(cs.overflowY);
+  // A scroller: an axis that scrolls and has something to scroll. (overflow-x: hidden
+  // alone computes overflow-y to auto; with nothing to scroll that is not a scroller.)
+  const scrolls = (n, cs) =>
+    (['auto', 'scroll'].includes(cs.overflowY) && n.scrollHeight > n.clientHeight + 1) ||
+    (['auto', 'scroll'].includes(cs.overflowX) && n.scrollWidth > n.clientWidth + 1);
   // The part of ``b`` that ancestors let show, and the nearest box that cut some of it
-  // off (a scroller hides on purpose and is not one).
+  // off (a scroller hides on purpose and is not one). An ancestor clips an absolutely
+  // positioned element only from its containing block up; a fixed one only the viewport.
   const showing = (el, b) => {
     let seen = meet(b, VIEW);
     let cutBy = null;
+    let pos = style(el).position;
     for (let n = parentOf(el); n && n.nodeType === 1; n = parentOf(n)) {
+      if (pos === 'fixed') break;
       const cs = style(n);
+      const block = cs.position !== 'static' || cs.transform !== 'none';
+      const skip = pos === 'absolute' && !block;
+      if (pos !== 'absolute' || block) pos = cs.position;
+      if (skip) continue;
       const clips = cs.overflowX !== 'visible' || cs.overflowY !== 'visible' ||
         (cs.clipPath && cs.clipPath !== 'none');
       if (!clips) continue;
       const before = area(seen);
       seen = meet(seen, rectOf(n.getBoundingClientRect()));
       const cuts = CUT.includes(cs.overflowX) || CUT.includes(cs.overflowY);
-      if (area(seen) < before - 1 && cuts && !scrolls(cs) && !cutBy) cutBy = n;
+      if (area(seen) < before - 1 && cuts && !scrolls(n, cs) && !cutBy) cutBy = n;
     }
     return {seen, cutBy};
   };
-  // Visually hidden on purpose: the sr-only pattern, a clip that hides it all, a fade-out.
+  // Visually hidden on purpose: the sr-only pattern (a clip of no area, a tiny box), a
+  // clip-path that hides it all, an element faded out.
+  const zeroClip = (c) => {
+    const m = /rect\(([^)]*)\)/.exec(c || '');
+    if (!m) return false;
+    const v = m[1].split(/[ ,]+/).filter(Boolean).map(parseFloat);
+    return v.length === 4 && (v[2] - v[0] <= 1 || v[1] - v[3] <= 1);
+  };
   const hiddenOnPurpose = (el, cs, rect) => {
     if (rect.width <= 2 && rect.height <= 2) return true;
-    if (cs.clip && /rect\(\s*0/.test(cs.clip)) return true;
+    if (zeroClip(cs.clip)) return true;
     if (cs.clipPath && /inset\(\s*50%/.test(cs.clipPath)) return true;
-    return opacity(el) < 0.1;
+    return groupOf(el).o < 0.1;
   };
-  const isFixed = (n) => {
+  // A bar fixed to an edge of the viewport (a header, a footer bar): what scrolls under it
+  // is not a layout fault. Any other fixed thing on top (a chat bubble, a banner over a
+  // button) still is.
+  const edgeBar = (n) => {
     for (let m = n; m && m.nodeType === 1; m = parentOf(m)) {
       const p = style(m).position;
-      if (p === 'fixed' || p === 'sticky') return true;
+      if (p !== 'fixed' && p !== 'sticky') continue;
+      const r = m.getBoundingClientRect();
+      return r.width >= vw * 0.9 && (r.top <= 1 || r.bottom >= vh - 1);
     }
     return false;
   };
-  // Something painted at (x, y): a background, an image or a control, or its own glyphs.
-  const paintsAt = (n, x, y) => {
+  const paints = (n, x, y) => {
     const cs = style(n);
     if (isMedia(n) || n.matches('input, select, textarea, button')) return true;
-    if (cs.backgroundImage && cs.backgroundImage !== 'none') return true;
+    if (imaged(cs)) return true;
     const bg = rgba(cs.backgroundColor);
     if (bg && bg[3] > 0.05) return true;
+    for (const pseudo of ['::before', '::after']) {
+      const ps = style(n, pseudo);
+      if (ps.content && ps.content !== 'none' && ps.content !== 'normal') {
+        const pb = rgba(ps.backgroundColor);
+        if ((pb && pb[3] > 0.05) || imaged(ps)) return true;
+      }
+    }
     const t = textRect(n);
     return !!t && x >= t.l && x <= t.r && y >= t.t && y <= t.b;
+  };
+  // Whether what was hit at (x, y) paints there: the hit or any ancestor of it up to
+  // the one it shares with ``el`` (an opaque modal whose transparent child was hit),
+  // looking into an open shadow root the hit-test stopped at.
+  const covers = (el, hit, x, y) => {
+    let top = hit;
+    for (let k = 0; k < 8 && top.shadowRoot; k++) {
+      const inner = top.shadowRoot.elementFromPoint(x, y);
+      if (!inner || inner === top) break;
+      top = inner;
+    }
+    for (let n = top; n && n.nodeType === 1; n = parentOf(n)) {
+      if (within(n, el)) return false;
+      if (paints(n, x, y)) return true;
+    }
+    return false;
   };
   const CONTROLS = 'button, a[href], input, select, textarea, [role=button], [role=link]';
   const LABELLED = new Set(['submit', 'button', 'reset']);
   const labelOf = (el, text) => {
-    if (text) return text.slice(0, 60);
+    if (text) return clipText(text, 60);
     // A typed value is never reported (it may be a password).
     const t = (el.getAttribute('type') || '').toLowerCase();
-    if (el.tagName === 'INPUT' && LABELLED.has(t)) return (el.value || t).slice(0, 60);
-    return (el.getAttribute('aria-label') || el.getAttribute('placeholder') ||
-      el.getAttribute('title') || t || el.tagName.toLowerCase()).slice(0, 60);
+    if (el.tagName === 'INPUT' && LABELLED.has(t)) return clipText(el.value || t, 60);
+    return clipText(el.getAttribute('aria-label') || el.getAttribute('placeholder') ||
+      el.getAttribute('title') || t || el.tagName.toLowerCase(), 60);
   };
-
-  const elements = [root];
-  const collect = (node) => {
-    for (const el of node.querySelectorAll('*')) {
-      if (elements.length >= maxElements) { truncated = true; return; }
-      elements.push(el);
-      if (el.shadowRoot) collect(el.shadowRoot);
-    }
-  };
-  if (root.shadowRoot) collect(root.shadowRoot);
-  collect(root);
 
   const contrast = (el, cs, tr, label, colourOf) => {
     if (el.closest(':disabled, [aria-disabled=true]')) return;
     const fg = rgba(colourOf);
     if (!fg) return;
-    const bg = background(el, (tr.l + tr.r) / 2, (tr.t + tr.b) / 2);
+    const {g, o} = groupOf(el);
+    const bg = background(el, (tr.l + tr.r) / 2, (tr.t + tr.b) / 2, g);
     if (!bg) { counts.unknown_background++; return; }
     counts.contrast_checked++;
-    const seen = over([fg[0], fg[1], fg[2], fg[3] * opacity(el)], bg);
-    const l1 = lum(seen), l2 = lum(bg);
+    // The text over its background inside the group, then the group faded once over
+    // what is below it.
+    const text = mix(over(fg, bg.inside), bg.below, o);
+    const back = mix(bg.inside, bg.below, o);
+    const l1 = lum(text), l2 = lum(back);
     const ratio = (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
     const size = parseFloat(cs.fontSize), bold = Number(cs.fontWeight) >= 700;
     const need = size >= 24 || (size >= 18.66 && bold) ? 3 : 4.5;
     if (ratio < need) add({kind: 'low_contrast', element: describe(el), text: label,
-      box_css: box(tr), ratio: Math.round(ratio * 100) / 100, needs: need, color: colourOf,
-      background: 'rgb(' + bg.slice(0, 3).map(Math.round).join(', ') + ')', font_px: size});
+      box_css: box(tr), ratio: Math.round(ratio * 100) / 100, needs: need,
+      color: clipText(colourOf, 60),
+      background: 'rgb(' + back.slice(0, 3).map(Math.round).join(', ') + ')', font_px: size});
   };
   const spills = (el, tr, em) => {
     // Out of the box that draws it (a border or a fill); a scroller on the way stops it.
     for (let n = el; n && n.nodeType === 1 && n !== document.body; n = parentOf(n)) {
       const ns = style(n);
-      if (scrolls(ns)) return null;
+      if (scrolls(n, ns)) return null;
       const drawn = parseFloat(ns.borderTopWidth) > 0 || parseFloat(ns.borderLeftWidth) > 0 ||
         (rgba(ns.backgroundColor) || [0, 0, 0, 0])[3] > 0;
       if (!drawn || ns.display === 'inline') continue;
@@ -282,14 +379,18 @@ _LAYOUT_FN = r"""(root, arg) => {
     return null;
   };
 
-  for (const el of elements) {
+  for (const el of all) {
+    if (performance.now() - started > budgetMs) { truncated = 'time'; break; }
+    if (counts.scanned >= maxElements) { truncated = 'elements'; break; }
     if (el.namespaceURI !== 'http://www.w3.org/1999/xhtml') continue;  // SVG: fill, not color
+    const rect = el.getBoundingClientRect();
     const cs = style(el);
+    if (cs.display !== 'contents' &&
+        (rect.right < 0 || rect.bottom < 0 || rect.left > vw || rect.top > vh)) continue;
     if (cs.visibility === 'hidden' || cs.display === 'none') continue;
     const text = ownText(el);
     const isControl = el.matches(CONTROLS);
     if (!text && !isControl) continue;
-    const rect = el.getBoundingClientRect();
     const tr = text ? textRect(el) : null;
     const extent = tr || rectOf(rect);
     if (area(extent) < 1) continue;
@@ -304,7 +405,8 @@ _LAYOUT_FN = r"""(root, arg) => {
       contrast(el, cs, meet(tr, seen), label, cs.color);
       const ownCut = CUT.includes(cs.overflowX) || CUT.includes(cs.overflowY);
       const own = rectOf(rect);
-      const pastOwn = Math.max(own.l - tr.l, tr.r - own.r);
+      const pastOwn = Math.max(own.l - tr.l, tr.r - own.r,
+        Math.max(own.t - tr.t, tr.b - own.b) - em / 3);
       if (ownCut && pastOwn > 2) {
         add({kind: 'clipped', element: describe(el), text: label, box_css: box(own),
           detail: cs.textOverflow === 'ellipsis' ? 'text is truncated with an ellipsis'
@@ -340,8 +442,8 @@ _LAYOUT_FN = r"""(root, arg) => {
     for (const x of xs) {
       const hit = scope.elementFromPoint(x, y);
       if (!hit || within(el, hit) || within(hit, el)) continue;
-      if (!paintsAt(hit, x, y)) continue;  // a transparent click-catcher, not a cover
-      if (isFixed(hit) && !isFixed(el)) { fixed++; continue; }
+      if (!covers(el, hit, x, y)) continue;  // a transparent click-catcher, not a cover
+      if (edgeBar(hit) && !edgeBar(el)) { fixed++; continue; }
       hidden++;
       by = by || hit;
     }
@@ -370,6 +472,41 @@ def _in_latest_px(page, rect, now) -> list[int] | None:
     return [round(x * s), round(y * s), round(w * s), round(h * s)]
 
 
+_KINDS = ("low_contrast", "clipped", "covered")
+_TEXT_KEYS = ("element", "text", "detail", "covered_by", "covered_points", "color", "background")
+_NUMBER_KEYS = ("ratio", "needs", "font_px")
+
+
+def _box(value) -> list[float] | None:
+    if not isinstance(value, list) or len(value) != 4:
+        return None
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value):
+        return None
+    return [float(v) for v in value]
+
+
+def _clean(raw) -> dict | None:
+    """One finding as the page script made it, checked: the scan runs where the page's own
+    globals apply, so its values are data to validate, not trust."""
+    if not isinstance(raw, dict) or raw.get("kind") not in _KINDS:
+        return None
+    box = _box(raw.get("box_css"))
+    if box is None:
+        return None
+    out: dict = {"kind": raw["kind"], "box_css": [round(v) for v in box]}
+    for key in _TEXT_KEYS:
+        if isinstance(raw.get(key), str):
+            out[key] = clip(raw[key], 200)
+    for key in _NUMBER_KEYS:
+        value = raw.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            out[key] = value
+    holder = _box(raw.get("holder_css"))
+    if holder is not None:
+        out["holder_css"] = [round(v) for v in holder]
+    return out
+
+
 async def _scan(page, selector: str, arg: dict) -> dict:
     """Run the scan on the page, or under the element a selector names (CSS,
     ``aria-ref=...``, ``text=...``, ``role=...``, as the other tools take them)."""
@@ -382,6 +519,10 @@ async def _scan(page, selector: str, arg: dict) -> dict:
 
 
 _KEEP = ("scanned", "contrast_checked", "unknown_background", "under_fixed", "not_hit_testable")
+
+
+def _count(value) -> int:
+    return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else 0
 
 
 def register(mcp: FastMCP, ctx: ServerContext) -> None:
@@ -403,7 +544,7 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
         if err:
             return err
         cap = max(1, min(int(max_findings), MAX_FINDINGS))
-        arg = {"cap": cap, "maxElements": MAX_ELEMENTS}
+        arg = {"cap": cap, "maxElements": MAX_ELEMENTS, "budgetMs": _SCAN_BUDGET_MS}
         try:
             data = await asyncio.wait_for(_scan(page, selector, arg), _READ_BUDGET_S)
         except Exception as exc:  # noqa: BLE001 — a bad selector, a navigation, a slow page
@@ -421,12 +562,13 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             data = {}
         if data.get("missing"):
             return {"status": "not_found", "selector": selector, "url": loggable_url(page.url)}
-        findings = [f for f in data.get("findings") or [] if isinstance(f, dict)]
+        findings = [f for f in (_clean(f) for f in data.get("findings") or []) if f]
         now = await marks.page_geometry(page) if findings else None
         for finding in findings:
-            px = _in_latest_px(page, finding.get("box_css") or [0, 0, 0, 0], now)
+            px = _in_latest_px(page, finding["box_css"], now)
             if px is not None:
                 finding["box_px"] = px
+        truncated = data.get("truncated")
         counts: dict[str, int] = {}
         for finding in findings:
             counts[finding.get("kind", "?")] = counts.get(finding.get("kind", "?"), 0) + 1
@@ -437,6 +579,6 @@ def register(mcp: FastMCP, ctx: ServerContext) -> None:
             "url": loggable_url(page.url),
             "findings": findings,
             "counts": counts,
-            **{k: int(data.get(k, 0) or 0) for k in _KEEP},
-            "truncated": bool(data.get("truncated")),
+            **{k: _count(data.get(k)) for k in _KEEP},
+            "truncated": truncated if truncated in ("findings", "elements", "time") else False,
         }

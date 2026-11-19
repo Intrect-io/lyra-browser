@@ -74,4 +74,22 @@ async def test_a_typed_value_never_comes_back(make_ctx, tools_of, page):
     # The page script labels controls by placeholder, aria-label or type; the Python side
     # passes findings through, so the script's contract is pinned here by its source.
     assert "el.value" in _LAYOUT_FN and "it may be a password" in _LAYOUT_FN
-    assert "LABELLED.has(t)) return (el.value" in _LAYOUT_FN  # only submit/button/reset
+    assert "LABELLED.has(t)) return clipText(el.value" in _LAYOUT_FN  # submit/button/reset only
+    assert "TEXTAREA') return ''" in _LAYOUT_FN  # a textarea's text node is its value
+
+
+async def test_findings_from_a_patched_page_are_checked_not_trusted(make_ctx, tools_of, page):
+    # A page that replaced Math.round gives back strings for numbers: those are dropped.
+    page.eval_answers[_LAYOUT_JS] = {
+        "findings": [
+            {"kind": "covered", "element": "p", "box_css": ["x", "x", "x", "x"]},
+            {"kind": "evil", "element": "p", "box_css": [0, 0, 1, 1]},
+            {"kind": "clipped", "element": "e" * 5000, "box_css": [1, 2, 3, 4], "extra": "z"},
+        ],
+        "scanned": "many",
+        "truncated": "yes please",
+    }
+    out = await (await tools_of(make_ctx()))["inspect_layout"]()
+    assert [f["kind"] for f in out["findings"]] == ["clipped"]
+    assert len(out["findings"][0]["element"]) <= 230 and "extra" not in out["findings"][0]
+    assert out["scanned"] == 0 and out["truncated"] is False

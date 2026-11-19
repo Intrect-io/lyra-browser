@@ -84,6 +84,32 @@ PAGE = """<!doctype html><html><head><title>layout</title>
 <div class="card" id="c-pre"><pre id="pre" style="overflow-x:auto;width:180px;margin:0">
 a long line of code that scrolls sideways in its own box</pre></div>
 <div class="card" id="c-shadow"><span id="host"></span></div>
+<div class="card" id="c-modal"><p id="undermodal">Text under a modal</p>
+ <div style="position:absolute;left:0;top:0;width:100%;height:60px;background:#fff">
+ <div style="height:100%"><div style="height:100%"></div></div></div></div>
+<div class="card" id="c-chat"><button id="chatbtn">Send message</button></div>
+<div id="bubble" style="position:fixed;width:70px;height:40px;background:#06c"></div>
+<div class="card" id="c-deco" style="padding:0;background:transparent;border:0">
+ <canvas id="decoimg" width="218" height="108" style="position:absolute;left:0;top:0;
+ pointer-events:none"></canvas>
+ <h3 id="deco" style="position:relative;margin:30px 12px;color:#fff">Over a scrim</h3></div>
+<div class="card" id="c-group" style="opacity:.5;background:#000">
+ <p id="grouped" style="color:#fff">Faded group</p></div>
+<div class="card" id="c-ta"><textarea id="ta" aria-label="Note" style="color:#ccc">
+draft account 1234 secret</textarea>
+ <div style="position:absolute;left:0;top:0;width:100%;height:30px;background:#eee"></div></div>
+<div class="card" id="c-tip" style="overflow:hidden;position:static;height:60px">
+ <span id="tip" style="position:absolute;margin-top:70px;color:#d0d0d0;background:#fff">
+ Tooltip below its card</span></div>
+<div class="card" id="c-vclip"><div id="vclip" style="height:20px;overflow:hidden;width:180px">
+ First line of text that wraps onto a second and a third line here</div></div>
+<div class="card" id="c-hclip"><div style="overflow-x:hidden;width:120px">
+ <p id="hclip" style="white-space:nowrap;margin:0">A row cut off sideways by its parent</p>
+ </div></div>
+<div class="card" id="c-crop"><span id="crop" style="position:absolute;clip:rect(0px,300px,
+ 40px,0px);color:#d0d0d0">Cropped but visible</span></div>
+<div class="card" id="LONG_ID" style="background:#fff">
+ <p style="color:#ddd">Long id</p></div>
 <p id="underfixed" style="position:absolute;left:30px;top:calc(100vh - 35px);margin:0">
  Under the bar</p>
 <div style="position:fixed;left:0;bottom:0;width:100%;height:50px;background:#333"></div>
@@ -94,11 +120,16 @@ dk.fillStyle = '#111'; dk.fillRect(0, 0, 218, 108);
 const sh = document.getElementById('host').attachShadow({mode: 'open'});
 sh.innerHTML = '<span id="shadowtext" style="color:#ddd">Faint in a shadow root</span>';
 document.getElementById('pw').value = 'hunter2-secret';
+const cb = document.getElementById('chatbtn').getBoundingClientRect();
+const bub = document.getElementById('bubble');
+bub.style.left = (cb.left - 5) + 'px'; bub.style.top = (cb.top - 8) + 'px';
+const dc = document.getElementById('decoimg').getContext('2d');
+dc.fillStyle = '#111'; dc.fillRect(0, 0, 218, 108);
 const s = {muts: 0};
 window.__s = s;
 new MutationObserver((m) => { s.muts += m.length; })
   .observe(document, {subtree: true, childList: true, attributes: true, characterData: true});
-</script></body></html>"""
+</script></body></html>""".replace("LONG_ID", "x" * 300)  # a 300-char id
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -122,6 +153,14 @@ async def ev(page, js: str):
         return await page.evaluate(js)
 
 
+async def expect_reflowed(page) -> None:
+    for _ in range(20):
+        if await ev(page, "() => innerHeight") == 1400:
+            return
+        await asyncio.sleep(0.1)
+    expect(False, "the viewport took its size", await ev(page, "() => innerHeight"))
+
+
 def of(findings: list[dict], kind: str, element_id: str) -> list[dict]:
     return [f for f in findings if f["kind"] == kind and f"#{element_id}" in f["element"]]
 
@@ -137,6 +176,16 @@ async def run_mode(base: str, *, headless: bool) -> None:
         expect((await tools["open_browser"]()).get("status") == "ok", "browser launches")
         expect((await tools["navigate"](url=base))["status"] == "ok", "page loads")
         page, _ = await acquire_page(ctx)
+        # One viewport for every mode, tall enough for all the cards above the fixed bar
+        # (a headful window is 1280x656 here, which would put the last rows under it).
+        from lyra_browser import cursor
+
+        await cursor.send_cdp(
+            page,
+            "Emulation.setDeviceMetricsOverride",
+            {"width": 1280, "height": 1400, "deviceScaleFactor": 1, "mobile": False},
+        )
+        await expect_reflowed(page)
         shot = await tools["screenshot"]()
 
         res = await tools["inspect_layout"]()
@@ -183,6 +232,33 @@ async def run_mode(base: str, *, headless: bool) -> None:
             "text under a fixed bar is counted, not called covered",
             res.get("under_fixed"),
         )
+        expect(
+            of(found, "covered", "undermodal"), "text under an opaque modal's inner box is covered"
+        )
+        chat = of(found, "covered", "chatbtn")
+        expect(chat, "a fixed chat bubble over a button is a cover (not an edge bar)", chat)
+        expect(
+            not of(found, "low_contrast", "deco"),
+            "white text over a pointer-events:none canvas is not judged",
+        )
+        expect(
+            of(found, "low_contrast", "grouped"),
+            "white on black in a half-faded card is under 4.5:1 (opacity applied once)",
+        )
+        expect(
+            "1234" not in str(found) and "draft account" not in str(found),
+            "a textarea's text is never in the reply",
+        )
+        tip = of(found, "low_contrast", "tip")
+        expect(
+            tip and not of(found, "clipped", "tip"),
+            "an absolute tooltip outside a non-positioned clipping card is seen, not clipped",
+            tip,
+        )
+        expect(of(found, "clipped", "vclip"), "lines cut off below their box are clipped")
+        expect(of(found, "clipped", "hclip"), "text cut off sideways by an overflow-x parent")
+        expect(of(found, "low_contrast", "crop"), "a crop that shows the text is still checked")
+        expect(all(len(f["element"]) <= 200 for f in found), "element descriptors are bounded")
         large = await tools["inspect_layout"](selector="#c-large")
         expect(
             large["findings"] == [] and large["contrast_checked"] >= 1,
@@ -218,7 +294,11 @@ async def run_mode(base: str, *, headless: bool) -> None:
             (target.get("box_px"), want),
         )
         capped = await tools["inspect_layout"](max_findings=2)
-        expect(len(capped["findings"]) == 2 and capped["truncated"], "max_findings caps", capped)
+        expect(
+            len(capped["findings"]) == 2 and capped["truncated"] == "findings",
+            "max_findings caps",
+            capped,
+        )
 
         times = []
         for _ in range(20):
