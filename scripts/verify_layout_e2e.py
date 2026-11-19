@@ -2,19 +2,20 @@
 """Exercise ``inspect_layout`` against a real browser.
 
 Same contract as the other ``verify_*_e2e.py`` gates (temporary profile, loopback site,
-``build_tools``; ``LYRA_BROWSER_DRIVER`` picks the driver). A page with one planted fault of
-each kind, and look-alikes that are not faults:
+``build_tools``; ``LYRA_BROWSER_DRIVER`` picks the driver). One page with planted faults and
+look-alikes that are not faults:
 
-- ``low_contrast``: #c2c2c2 on #fafafa is found with its ratio; #222 is not; 26 px text at
-  3.5:1 passes the large-text threshold; text on a gradient is counted as an unknown
-  background, never judged;
-- ``clipped``: text cut off by ``overflow: hidden`` and text spilling out of a bordered card
-  are found; text that fits is not;
-- ``covered``: text with a box over half of it and a button under an overlay are found;
-  a child element on top of its own parent is not;
-- ``selector`` scopes the scan (a clean region has no findings; a missing one answers
-  ``not_found``); ``box_px`` maps into the latest screenshot; the page sees 0 mutations;
-- the scan's time over N=20 is printed (p50).
+- found: low-contrast text (also on an oklch background, as a placeholder, inside a shadow
+  root), text cut off by its box or spilling out of its card, text with a box over it, a
+  button and a password field under overlays (the typed value never in the reply);
+- not reported: readable text, large text at 3.5:1 (checked, not skipped), white on an oklch
+  dark background, a disabled control, text over a canvas or a gradient (counted as unknown
+  backgrounds), rows scrolled out of a scroller, sr-only and faded-out text, a scrolling
+  ``pre``, a child over its parent's text, a transparent stretched link, text under a fixed
+  bar (counted as ``under_fixed``);
+- ``selector`` takes CSS and ``text=``; a missing one is ``not_found``, an invalid one an
+  ``error``; ``box_px`` maps into the latest screenshot; ``max_findings`` caps; the page
+  sees 0 mutations; the scan's time over N=20 is printed (p50).
 """
 
 from __future__ import annotations
@@ -54,9 +55,45 @@ PAGE = """<!doctype html><html><head><title>layout</title>
 <div class="card" id="c-btn"><button id="btncov">Save</button>
  <div style="position:absolute;left:0;top:0;width:100%;height:60px;background:rgba(0,0,0,.4)">
  </div></div>
-<div class="card" id="clean"><p>All good here</p><button>Fine</button>
- <span style="position:relative">Parent <b>child on top</b></span></div>
+<div class="card" id="clean" style="height:auto"><p>All good here</p><button>Fine</button>
+ <p id="parent" style="position:relative">Parent text here
+ <span style="position:absolute;left:0;top:0;background:#fafafa">child</span></p></div>
+<div class="card" id="c-scroll"><div id="scroller" style="height:60px;overflow:auto">
+ <p>row 1</p><p>row 2</p><p>row 3</p><p>row 4</p><p>row 5</p><p>row 6</p><p>row 7</p>
+ <p>row 8</p><p>row 9</p><p>row 10</p></div></div>
+<div class="card" id="c-sr"><button>Icon<span id="sr" style="position:absolute;width:1px;
+ height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;
+ border:0">opens in a new tab</span></button></div>
+<div class="card" id="c-hero" style="padding:0">
+ <canvas id="dark" width="218" height="108"></canvas>
+ <h3 id="hero" style="position:absolute;left:12px;top:30px;margin:0;color:#fff">Welcome</h3></div>
+<div class="card" id="c-fade"><p id="faded" style="opacity:0">Hidden tooltip</p></div>
+<div class="card" id="c-stretch"><p id="stretchp">Card title</p>
+ <a href="#x" id="stretch">Read</a>
+ <style>#stretch::after{content:'';position:absolute;inset:0;z-index:1}</style></div>
+<div class="card" id="c-pw"><input id="pw" type="password" aria-label="Password">
+ <div style="position:absolute;left:0;top:0;width:100%;height:70px;background:#ddd"></div></div>
+<div class="card" id="c-ok-dark" style="background:oklch(0.21 0.03 265)">
+ <p id="okdark" style="color:#fff">White on oklch dark</p></div>
+<div class="card" id="c-ok-light" style="background:oklch(0.97 0 0)">
+ <p id="oklight" style="color:oklch(0.85 0 0)">Pale on oklch light</p></div>
+<div class="card" id="c-ph" style="background:#fff"><input id="ph" placeholder="Email"
+ style="color:#222;border:1px solid #888"><style>#ph::placeholder{color:#ccc}</style></div>
+<div class="card" id="c-dis" style="background:#fff">
+ <button id="dis" disabled style="color:#bbb;background:#fff">Disabled</button></div>
+<div class="card" id="c-pre"><pre id="pre" style="overflow-x:auto;width:180px;margin:0">
+a long line of code that scrolls sideways in its own box</pre></div>
+<div class="card" id="c-shadow"><span id="host"></span></div>
+<p id="underfixed" style="position:absolute;left:30px;top:calc(100vh - 35px);margin:0">
+ Under the bar</p>
+<div style="position:fixed;left:0;bottom:0;width:100%;height:50px;background:#333"></div>
 <script>
+document.getElementById('scroller').scrollTop = 200;
+const dk = document.getElementById('dark').getContext('2d');
+dk.fillStyle = '#111'; dk.fillRect(0, 0, 218, 108);
+const sh = document.getElementById('host').attachShadow({mode: 'open'});
+sh.innerHTML = '<span id="shadowtext" style="color:#ddd">Faint in a shadow root</span>';
+document.getElementById('pw').value = 'hunter2-secret';
 const s = {muts: 0};
 window.__s = s;
 new MutationObserver((m) => { s.muts += m.length; })
@@ -117,10 +154,56 @@ async def run_mode(base: str, *, headless: bool) -> None:
         expect(of(found, "covered", "coveredp"), "text with a box over half of it is covered")
         expect(of(found, "covered", "btncov"), "a button under an overlay is covered")
 
+        texts = [f.get("text", "") for f in found]
+        expect(
+            not [f for f in found if any(k in f["element"] for k in ("scroller", "#sr", "#faded"))]
+            and not any(t.startswith("row ") for t in texts),
+            "scrolled-away rows, sr-only and faded-out text are not faults",
+            [f for f in found if "row " in f.get("text", "") or "#sr" in f["element"]],
+        )
+        expect(not of(found, "low_contrast", "hero"), "white text over a dark canvas is not judged")
+        expect(
+            not of(found, "covered", "stretchp") and not of(found, "covered", "stretch"),
+            "a transparent click-catcher over a card is not a cover",
+        )
+        pw = of(found, "covered", "pw")
+        expect(
+            pw and "hunter2" not in str(found),
+            "a covered password field: found, value not shown",
+            pw,
+        )
+        expect(not of(found, "low_contrast", "okdark"), "white on an oklch dark background passes")
+        expect(of(found, "low_contrast", "oklight"), "pale on an oklch light background is found")
+        expect(of(found, "low_contrast", "ph"), "a pale placeholder is low contrast")
+        expect(not of(found, "low_contrast", "dis"), "a disabled control is exempt")
+        expect(not of(found, "clipped", "pre"), "a line that scrolls in its own box is not clipped")
+        expect(of(found, "low_contrast", "shadowtext"), "faint text in a shadow root is found")
+        expect(
+            not of(found, "covered", "underfixed") and res["under_fixed"] >= 1,
+            "text under a fixed bar is counted, not called covered",
+            res.get("under_fixed"),
+        )
+        large = await tools["inspect_layout"](selector="#c-large")
+        expect(
+            large["findings"] == [] and large["contrast_checked"] >= 1,
+            "26 px text at 3.5:1 was checked and passed",
+            large,
+        )
+        ref = await tools["inspect_layout"](selector="text=Faint status line")
+        expect(
+            ref.get("status") == "ok" and ref["counts"].get("low_contrast") == 1,
+            "a text= selector scopes it as the other tools' selectors do",
+            ref,
+        )
+        bad = await tools["inspect_layout"](selector="[")
+        expect(
+            bad.get("status") == "error", "an invalid selector is an error, not unavailable", bad
+        )
+
         clean = await tools["inspect_layout"](selector="#clean")
         expect(
             clean.get("status") == "ok" and clean["findings"] == [] and clean["scanned"] >= 3,
-            "a clean region has no findings (a child on top of its parent is not covered)",
+            "a clean region has no findings (a child over its parent's text is not a cover)",
             clean,
         )
         res2 = await tools["inspect_layout"](selector="#nothing-here")

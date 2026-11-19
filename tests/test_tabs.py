@@ -405,6 +405,7 @@ READ_TOOLS = {
     "read_draft": {},
     "wait_for": {"text": "ready"},
     "tabs": {},
+    "inspect_layout": {},
 }
 
 # How a browser ends up closed, and whether closing its last tab takes the browser with

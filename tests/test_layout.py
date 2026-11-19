@@ -6,7 +6,7 @@ What the page script finds is scripts/verify_layout_e2e.py (a real page, both dr
 from __future__ import annotations
 
 from lyra_browser import marks
-from lyra_browser.tools.layout import _LAYOUT_JS, MAX_FINDINGS
+from lyra_browser.tools.layout import _LAYOUT_FN, _LAYOUT_JS, MAX_FINDINGS
 from lyra_browser.uat.spec import DEFAULT_TOOLS
 
 FINDINGS = [
@@ -30,14 +30,23 @@ async def test_the_cap_is_clamped_and_passed_to_the_page(make_ctx, tools_of, pag
     page.eval_answers[_LAYOUT_JS] = {"findings": [], "scanned": 0}
     tools = await tools_of(make_ctx())
     await tools["inspect_layout"](max_findings=10_000)
-    await tools["inspect_layout"](max_findings=0, selector="#x")
+    await tools["inspect_layout"](max_findings=0)
     args = [c[2] for c in page.calls if c[0] == "evaluate" and c[1] == _LAYOUT_JS]
-    assert args[0]["cap"] == MAX_FINDINGS and args[1]["cap"] == 1 and args[1]["selector"] == "#x"
+    assert args[0]["cap"] == MAX_FINDINGS and args[1]["cap"] == 1
+
+
+async def test_a_selector_scans_under_the_element_it_names(make_ctx, tools_of, page):
+    page.present = {"aria-ref=e7"}
+    tools = await tools_of(make_ctx())
+    out = await tools["inspect_layout"](selector="aria-ref=e7")
+    assert out["status"] == "ok"
+    asked = [c for c in page.calls if c[0] == "evaluate" and c[1] == "aria-ref=e7"]
+    assert asked and asked[0][2] == _LAYOUT_FN
 
 
 async def test_a_missing_region_and_a_failed_read_say_so(make_ctx, tools_of, page):
     tools = await tools_of(make_ctx())
-    page.eval_answers[_LAYOUT_JS] = {"missing": True}
+    page.present = set()
     assert (await tools["inspect_layout"](selector="#gone"))["status"] == "not_found"
     page.eval_answers[_LAYOUT_JS] = RuntimeError("Execution context was destroyed")
     out = await tools["inspect_layout"]()
@@ -59,3 +68,10 @@ def test_the_visual_eval_does_not_get_it():
     # The eval measures what a model sees; a DOM reading of contrast and overlap would
     # answer its tasks without looking (README, inspect_layout).
     assert "inspect_layout" not in DEFAULT_TOOLS
+
+
+async def test_a_typed_value_never_comes_back(make_ctx, tools_of, page):
+    # The page script labels controls by placeholder, aria-label or type; the Python side
+    # passes findings through, so the script's contract is pinned here by its source.
+    assert "el.value" in _LAYOUT_FN and "it may be a password" in _LAYOUT_FN
+    assert "LABELLED.has(t)) return (el.value" in _LAYOUT_FN  # only submit/button/reset

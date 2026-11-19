@@ -556,24 +556,37 @@ budget. Median time evidence added to a click, N=20 clicks per arm taken in alte
 ### Layout faults from the page itself: `inspect_layout`
 
 Looking misses what is a shade or a pixel off. `inspect_layout(selector="", max_findings=30)`
-reads the computed styles and geometry of what is on screen and names three kinds of fault:
-`low_contrast` (text under WCAG AA against its effective background, 4.5:1 or 3:1 for large
-text, with the ratio and both colours), `clipped` (text cut off by its own box, or spilling
-out of the bordered or filled box that holds it) and `covered` (text or a control with
-another element on top, asked of the page at five points across it with
-`elementFromPoint`). Each finding has `box_css` and, when there is a screenshot of the page,
-`box_px` for `screenshot(region=...)`. It only reads: no permission, nothing written to the
-page. A background that is an image, a gradient or a canvas has no colour to compute; those
-are counted (`unknown_background`), not guessed.
+reads the computed styles and geometry of what is visible and names three kinds of fault:
+`low_contrast` (text under WCAG AA against what is painted behind it, 4.5:1 or 3:1 for large
+text, with the ratio and both colours; disabled controls are exempt, as in WCAG 1.4.3),
+`clipped` (text cut off by its own box or by an ancestor that clips, or spilling out of the
+bordered or filled box that holds it) and `covered` (text or a control with something
+painted on top). What is behind a text comes from the page's own paint order at that point
+(`elementsFromPoint`), and colours in any CSS space (oklch, lab, `color-mix`) are converted
+through a canvas that is never attached to the page. Text over an image, a video, a canvas or
+a gradient is counted (`unknown_background`), not guessed. Not faults, by design: text that is
+not visible (scrolled out of its scroller, clipped away, `opacity: 0`, visually-hidden
+`sr-only` text), text under a fixed or sticky bar (counted, `under_fixed`), a transparent
+click-catcher over a card, and text that cannot be hit-tested (`pointer-events: none`,
+counted). Open shadow roots are scanned; `selector` takes CSS or the other tools' `aria-ref=`,
+`text=` and `role=` forms. Each finding has `box_css` and, when there is a screenshot of the
+page, `box_px` for `screenshot(region=...)`. It only reads: no permission, nothing written to
+the page, and a control is labelled by its placeholder, `aria-label` or type, never by the
+value typed into it.
 
 Measured 2026-11-19 with Chrome 157.0.8103.38 (`scripts/verify_layout_e2e.py`, native and
-Playwright 1.65.2, headless and headful): on a page with one planted fault of each kind and
-look-alikes, `#c2c2c2` text on `#fafafa` is found (ratio under 2), `#222` text and 26 px
-text at 3.5:1 are not, text on a gradient is counted and not judged, text cut off by
-`overflow: hidden` and text spilling out of its card are found while text that fits is not,
-text with a box over half of it and a button under an overlay are found while a child on top
-of its own parent is not; the page's `MutationObserver` records 0 mutations; a scan took
-2-4 ms at the median (N=20, a small page).
+Playwright 1.65.2, headless and headful), on a page with planted faults and look-alikes:
+found are `#c2c2c2` text on `#fafafa` (ratio under 2), pale text on an oklch background, a
+pale placeholder, faint text inside a shadow root, text cut off by `overflow: hidden`, text
+spilling out of its card, text with a box over half of it, a button under an overlay and a
+password field under an overlay (its value not in the reply); not reported are `#222` text,
+26 px text at 3.5:1 (checked and passed), white text on an oklch dark background, a disabled
+control, text over a dark canvas and on a gradient (counted as unknown), rows scrolled out of
+a scroller, `sr-only` and faded-out text, a line that scrolls inside a `pre`, a child over
+its parent's text, a card under a transparent stretched link, and text under a fixed bar
+(counted). The page's `MutationObserver` records 0 mutations; a scan of that page (about 30
+cards) took 9-11 ms at the median (N=20). Before this, a review of a first version found 31
+false-positive and false-negative cases, which the list above now pins.
 
 `lyra-uat` personas do not get `inspect_layout` by default (`DEFAULT_TOOLS`): the visual eval
 measures what a model sees, and a DOM reading of contrast and overlap would answer its v2
