@@ -566,7 +566,8 @@ painted on top). What is behind a text comes from the page's own paint order at 
 through a canvas that is never attached to the page. Text over an image, a video, a canvas or
 a gradient is counted (`unknown_background`), not guessed. Not faults, by design: text that is
 not visible (scrolled out of its scroller, clipped away, `opacity: 0`, visually-hidden
-`sr-only` text), text under a fixed or sticky bar (counted, `under_fixed`), a transparent
+`sr-only` text), text under a sticky element or a bar fixed along a viewport edge (counted,
+`under_fixed`), a transparent
 click-catcher over a card, and text that cannot be hit-tested (`pointer-events: none`,
 counted). Open shadow roots are scanned; `selector` takes CSS or the other tools' `aria-ref=`,
 `text=` and `role=` forms. Each finding has `box_css` and, when there is a screenshot of the
@@ -589,11 +590,14 @@ white on an oklch dark background, a disabled control, text over a dark canvas (
 `pointer-events: none`) and on a gradient (counted as unknown), rows scrolled out of a
 scroller, `sr-only` and faded-out text, a line that scrolls inside a `pre`, a child over its
 parent's text, a card under a transparent stretched link, and text under a bar fixed to the
-viewport's edge (counted). Element descriptors stay under 200 characters even for a 300-char
-id. The page's `MutationObserver` records 0 mutations; a scan of that page (about 40 cards)
-took 8-10 ms at the median (N=20), and the page script stops itself after 3.5 s
-(`truncated: "time"`) before the tool's 5 s wait runs out. Two review rounds (each finding
-verified by a separate reviewer trying to refute it) found 31 and then 16 cases; each one that
+viewport's edge (counted), text over a `pointer-events: none` colour scrim or a `::before`
+fill (unknown), the button beside an ellipsis, a float beside wrapped text, an invisible file
+input over its label, a checkbox, and a box that scrolls sideways. Element descriptors stay
+under 200 characters even for a 300-char
+id. The page's `MutationObserver` records 0 mutations; a scan of that page (about 50 cards)
+took 19-22 ms at the median (N=20), and the page script stops itself after 3.5 s
+(`truncated: "time"`) before the tool's 5 s wait runs out. Three review rounds (each finding
+verified by separate reviewers trying to refute it) found 31, 16 and 11 cases; each one that
 held is pinned in the gate or the unit tests.
 
 `lyra-uat` personas do not get `inspect_layout` by default (`DEFAULT_TOOLS`): the visual eval

@@ -110,6 +110,26 @@ draft account 1234 secret</textarea>
  40px,0px);color:#d0d0d0">Cropped but visible</span></div>
 <div class="card" id="LONG_ID" style="background:#fff">
  <p style="color:#ddd">Long id</p></div>
+<div class="card" id="c-scrim" style="background:#fff"><div style="position:absolute;inset:0;
+ background:rgba(0,0,0,.7);pointer-events:none"></div>
+ <p id="scrimmed" style="position:relative;color:#fff">Sold out</p></div>
+<div class="card" id="c-ell"><div style="display:flex"><span id="ell" style="width:90px;
+ overflow:hidden;white-space:nowrap;text-overflow:ellipsis">quarterly-report-final.pdf</span>
+ <button>Delete</button></div></div>
+<div class="card" id="c-float" style="height:auto"><div style="float:left;width:60px;height:60px;
+ background:#888"></div><p id="wrapped" style="margin:0">Text that wraps beside a floated box
+ and runs on below it for a few lines here</p></div>
+<div class="card" id="c-file"><label style="position:relative;display:inline-block">
+ <span id="filebtn" style="background:#06c;color:#fff;padding:6px">Choose file</span>
+ <input type="file" style="position:absolute;inset:0;opacity:0"></label></div>
+<div class="card" id="c-badge"><style>.tag{position:relative;z-index:0;color:#fff}
+ .tag::before{content:"";position:absolute;inset:-2px -6px;background:#c00;z-index:-1}</style>
+ <p>Status <span class="tag" id="badge">New</span></p></div>
+<div class="card" id="c-check" style="background:#111;color:#fff">
+ <input id="check" type="checkbox" style="appearance:none;width:16px;height:16px;background:#fff">
+ Subscribe</div>
+<div class="card" id="c-pre2"><pre id="pre2" style="width:180px;overflow-x:auto;overflow-y:hidden;
+ margin:0">a long line of code that scrolls sideways</pre></div>
 <p id="underfixed" style="position:absolute;left:30px;top:calc(100vh - 35px);margin:0">
  Under the bar</p>
 <div style="position:fixed;left:0;bottom:0;width:100%;height:50px;background:#333"></div>
@@ -259,6 +279,16 @@ async def run_mode(base: str, *, headless: bool) -> None:
         expect(of(found, "clipped", "hclip"), "text cut off sideways by an overflow-x parent")
         expect(of(found, "low_contrast", "crop"), "a crop that shows the text is still checked")
         expect(all(len(f["element"]) <= 200 for f in found), "element descriptors are bounded")
+        expect(
+            not of(found, "low_contrast", "scrimmed"),
+            "text over a pointer-events:none colour scrim is not judged",
+        )
+        expect(not of(found, "covered", "ell"), "the button beside an ellipsis is not a cover")
+        expect(not of(found, "covered", "wrapped"), "a float beside wrapped text is not a cover")
+        expect(not of(found, "covered", "filebtn"), "an invisible file input is not a cover")
+        expect(not of(found, "low_contrast", "badge"), "text on a ::before fill is not judged")
+        expect(not of(found, "low_contrast", "check"), "a checkbox has no text to judge")
+        expect(not of(found, "clipped", "pre2"), "a box that scrolls sideways is not clipping")
         large = await tools["inspect_layout"](selector="#c-large")
         expect(
             large["findings"] == [] and large["contrast_checked"] >= 1,

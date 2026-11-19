@@ -127,11 +127,24 @@ _LAYOUT_FN = r"""(root, arg) => {
   const MEDIA = new Set(['IMG', 'VIDEO', 'CANVAS', 'IFRAME', 'OBJECT', 'EMBED', 'PICTURE']);
   const isMedia = (n) => MEDIA.has(n.tagName) || n instanceof SVGSVGElement;
   const imaged = (cs) => cs.backgroundImage && cs.backgroundImage !== 'none';
+  // A ::before/::after that paints a fill (a badge, a highlight): its box is not
+  // knowable from here, so what it paints behind the text is unknown.
+  const pseudoFill = (n) => {
+    for (const pseudo of ['::before', '::after']) {
+      const ps = getComputedStyle(n, pseudo);
+      if (!ps.content || ps.content === 'none' || ps.content === 'normal') continue;
+      const pb = rgba(ps.backgroundColor);
+      if ((pb && pb[3] > 0.05) || imaged(ps)) return true;
+    }
+    return false;
+  };
   const contains = (r, x, y) => x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 
   const all = [];
+  const late = () => performance.now() - started > budgetMs;
   const gather = (node) => {
     for (const el of node.querySelectorAll('*')) {
+      if (late()) { truncated = 'time'; return; }
       all.push(el);
       if (el.shadowRoot) gather(el.shadowRoot);
     }
@@ -143,6 +156,7 @@ _LAYOUT_FN = r"""(root, arg) => {
   // decorative image or scrim behind a heading. elementsFromPoint leaves them out.
   const inert = [];
   for (const n of all) {
+    if (late()) { truncated = 'time'; break; }
     const r = n.getBoundingClientRect();
     if (r.width < 1 || r.height < 1 || r.right < 0 || r.bottom < 0 || r.left > vw || r.top > vh) {
       continue;
@@ -157,19 +171,15 @@ _LAYOUT_FN = r"""(root, arg) => {
   // fading group (if any) and ``below`` it. null when an image, video, canvas or
   // gradient is in the way: then it cannot be computed.
   const background = (el, x, y, g) => {
-    for (const {n, r} of inert) {
-      if (!within(el, n) && !within(n, el) && contains(r, x, y)) {
-        const cs = style(n);
-        if (isMedia(n) || imaged(cs)) return null;
-      }
-    }
+    // A layer hit-testing skips cannot be placed in the paint order: unknown.
+    for (const {n, r} of inert) if (!within(el, n) && contains(r, x, y)) return null;
     const scope = el.getRootNode().elementsFromPoint ? el.getRootNode() : document;
     const stack = scope.elementsFromPoint(x, y);
     let i = stack.indexOf(el);
     const inside = [], below = [];
     const take = (n) => {
       const cs = style(n);
-      if (isMedia(n) || imaged(cs)) return false;
+      if (isMedia(n) || imaged(cs) || pseudoFill(n)) return false;
       const c = rgba(cs.backgroundColor);
       if (c && c[3] > 0) {
         if (g && within(g, n)) inside.push(c);
@@ -216,6 +226,18 @@ _LAYOUT_FN = r"""(root, arg) => {
     }
     return b;
   };
+  const textLines = (el) => {
+    const out = [];
+    for (const n of el.childNodes) {
+      if (n.nodeType !== 3 || !n.nodeValue.trim()) continue;
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      for (const r of range.getClientRects()) {
+        if (r.width >= 1 && r.height >= 1) out.push(rectOf(r));
+      }
+    }
+    return out.length ? out : [{l: 0, t: 0, r: 0, b: 0}];
+  };
   const describe = (el, depth = 0) => {
     let s = el.tagName.toLowerCase();
     if (el.id) return s + '#' + clipText(el.id, 40);
@@ -256,6 +278,8 @@ _LAYOUT_FN = r"""(root, arg) => {
     let pos = style(el).position;
     for (let n = parentOf(el); n && n.nodeType === 1; n = parentOf(n)) {
       if (pos === 'fixed') break;
+      // html's and body's overflow apply to the viewport, already accounted for.
+      if (n === document.documentElement || n === document.body) continue;
       const cs = style(n);
       const block = cs.position !== 'static' || cs.transform !== 'none';
       const skip = pos === 'absolute' && !block;
@@ -285,20 +309,25 @@ _LAYOUT_FN = r"""(root, arg) => {
     if (cs.clipPath && /inset\(\s*50%/.test(cs.clipPath)) return true;
     return groupOf(el).o < 0.1;
   };
-  // A bar fixed to an edge of the viewport (a header, a footer bar): what scrolls under it
-  // is not a layout fault. Any other fixed thing on top (a chat bubble, a banner over a
-  // button) still is.
+  // What scrolls under a sticky element (a table header, a section title) or under a
+  // bar fixed along an edge of the viewport (a header, a footer, a sidebar) is not a
+  // layout fault. Any other fixed thing on top (a chat bubble, a banner over a button)
+  // still is.
   const edgeBar = (n) => {
     for (let m = n; m && m.nodeType === 1; m = parentOf(m)) {
       const p = style(m).position;
-      if (p !== 'fixed' && p !== 'sticky') continue;
+      if (p === 'sticky') return true;
+      if (p !== 'fixed') continue;
       const r = m.getBoundingClientRect();
-      return r.width >= vw * 0.9 && (r.top <= 1 || r.bottom >= vh - 1);
+      const across = r.width >= vw * 0.5 && (r.top <= 1 || r.bottom >= vh - 1);
+      const down = r.height >= vh * 0.5 && (r.left <= 1 || r.right >= vw - 1);
+      if (across || down) return true;
     }
     return false;
   };
   const paints = (n, x, y) => {
     const cs = style(n);
+    if (groupOf(n).o < 0.1 || cs.visibility === 'hidden') return false;  // invisible overlay
     if (isMedia(n) || n.matches('input, select, textarea, button')) return true;
     if (imaged(cs)) return true;
     const bg = rgba(cs.backgroundColor);
@@ -331,6 +360,9 @@ _LAYOUT_FN = r"""(root, arg) => {
   };
   const CONTROLS = 'button, a[href], input, select, textarea, [role=button], [role=link]';
   const LABELLED = new Set(['submit', 'button', 'reset']);
+  // Inputs whose value or placeholder is drawn as text in their colour.
+  const TEXTUAL = new Set(['', 'text', 'search', 'email', 'url', 'tel', 'number', 'password',
+    'date', 'time', 'datetime-local', 'month', 'week']);
   const labelOf = (el, text) => {
     if (text) return clipText(text, 60);
     // A typed value is never reported (it may be a password).
@@ -403,11 +435,11 @@ _LAYOUT_FN = r"""(root, arg) => {
 
     if (text && tr) {
       contrast(el, cs, meet(tr, seen), label, cs.color);
-      const ownCut = CUT.includes(cs.overflowX) || CUT.includes(cs.overflowY);
       const own = rectOf(rect);
-      const pastOwn = Math.max(own.l - tr.l, tr.r - own.r,
-        Math.max(own.t - tr.t, tr.b - own.b) - em / 3);
-      if (ownCut && pastOwn > 2) {
+      const pastX = CUT.includes(cs.overflowX) ? Math.max(own.l - tr.l, tr.r - own.r) : 0;
+      const pastY = CUT.includes(cs.overflowY)
+        ? Math.max(own.t - tr.t, tr.b - own.b) - em / 3 : 0;
+      if (Math.max(pastX, pastY) > 2) {
         add({kind: 'clipped', element: describe(el), text: label, box_css: box(own),
           detail: cs.textOverflow === 'ellipsis' ? 'text is truncated with an ellipsis'
             : 'text is cut off by its own box (overflow ' + cs.overflow + ')'});
@@ -424,7 +456,10 @@ _LAYOUT_FN = r"""(root, arg) => {
       // A control's own text: its value or its placeholder (the colour, never the value).
       const t = (el.getAttribute('type') || '').toLowerCase();
       const inner = meet(rectOf(rect), seen);
-      if ((el.tagName === 'INPUT' && LABELLED.has(t)) || el.value) {
+      const drawsText = el.tagName !== 'INPUT' || TEXTUAL.has(t) || LABELLED.has(t);
+      if (!drawsText) {
+        // A checkbox, radio, range or colour input draws no text.
+      } else if ((el.tagName === 'INPUT' && LABELLED.has(t)) || el.value) {
         contrast(el, cs, inner, label, cs.color);
       } else if (el.getAttribute('placeholder')) {
         contrast(el, cs, inner, label, style(el, '::placeholder').color);
@@ -433,13 +468,24 @@ _LAYOUT_FN = r"""(root, arg) => {
 
     // What is on top: points across the text, or the centre of a control.
     if (cs.pointerEvents === 'none') { counts.not_hit_testable++; continue; }
-    const probe = meet(extent, seen);
-    const y = (probe.t + probe.b) / 2;
-    const xs = tr ? [0.1, 0.3, 0.5, 0.7, 0.9].map((f) => probe.l + (probe.r - probe.l) * f)
-      : [(probe.l + probe.r) / 2];
+    // Points on the text's own line boxes (not the union, which can span a float or the
+    // space beside a short last line), inside what its own box and its ancestors show.
+    let shown = seen;
+    if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') shown = meet(shown, rectOf(rect));
+    const probe = meet(extent, shown);
+    const lines = tr ? textLines(el) : [probe];
+    const points = [];
+    const FRAC = [0.1, 0.3, 0.5, 0.7, 0.9];
+    for (let k = 0; k < (tr ? 5 : 1); k++) {
+      const line = lines[Math.floor((k * lines.length) / (tr ? 5 : 1))];
+      const r = meet(line, shown);
+      if (area(r) < 1) continue;
+      points.push([tr ? r.l + (r.r - r.l) * FRAC[k] : (r.l + r.r) / 2, (r.t + r.b) / 2]);
+    }
+    if (!points.length) continue;
     const scope = el.getRootNode().elementFromPoint ? el.getRootNode() : document;
     let hidden = 0, by = null, fixed = 0;
-    for (const x of xs) {
+    for (const [x, y] of points) {
       const hit = scope.elementFromPoint(x, y);
       if (!hit || within(el, hit) || within(hit, el)) continue;
       if (!covers(el, hit, x, y)) continue;  // a transparent click-catcher, not a cover
@@ -449,7 +495,7 @@ _LAYOUT_FN = r"""(root, arg) => {
     }
     if (fixed) counts.under_fixed++;
     if (hidden) add({kind: 'covered', element: describe(el), text: label, box_css: box(probe),
-      covered_by: describe(by), covered_points: hidden + '/' + xs.length});
+      covered_by: describe(by), covered_points: hidden + '/' + points.length});
   }
   return {findings, truncated, ...counts};
 }"""
