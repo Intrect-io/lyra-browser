@@ -61,7 +61,7 @@ agent loop ──(MCP: stdio/http)──> lyra-browser server ──> Playwright
 | Interaction | `click`, `type_text`, `press_key`, `hover`, `scroll`, `handle_dialog` |
 | Downloads | `list_downloads` |
 | Forms | `read_form`, `select_option`, `set_editor`, `upload_file`, `read_draft`, `save_draft`, `publish` |
-| Reading | `get_url`, `read_page`, `screenshot`, `read_image` |
+| Reading | `get_url`, `read_page`, `screenshot`, `read_image`, `inspect_layout` |
 | DevTools | `console_messages`, `network_requests`, `network_request`, `page_performance`, `storage`, `export_har`, `evaluate` |
 | Collaboration | `highlight_element`, `ask_user_to_do`, `request_takeover`, `resume_after_takeover` |
 
@@ -552,6 +552,32 @@ Measured 2026-11-18 (Chrome 157, `scripts/verify_evidence_e2e.py`, native and Pl
 settled within the wait, a never-ending animation answered `timeout` within 1.6 s of a 1 s
 budget. Median time evidence added to a click, N=20 clicks per arm taken in alternation
 (cursor off in both arms): 79–81 ms over four runs (native headless and headful).
+
+### Layout faults from the page itself: `inspect_layout`
+
+Looking misses what is a shade or a pixel off. `inspect_layout(selector="", max_findings=30)`
+reads the computed styles and geometry of what is on screen and names three kinds of fault:
+`low_contrast` (text under WCAG AA against its effective background, 4.5:1 or 3:1 for large
+text, with the ratio and both colours), `clipped` (text cut off by its own box, or spilling
+out of the bordered or filled box that holds it) and `covered` (text or a control with
+another element on top, asked of the page at five points across it with
+`elementFromPoint`). Each finding has `box_css` and, when there is a screenshot of the page,
+`box_px` for `screenshot(region=...)`. It only reads: no permission, nothing written to the
+page. A background that is an image, a gradient or a canvas has no colour to compute; those
+are counted (`unknown_background`), not guessed.
+
+Measured 2026-11-19 with Chrome 157.0.8103.38 (`scripts/verify_layout_e2e.py`, native and
+Playwright 1.65.2, headless and headful): on a page with one planted fault of each kind and
+look-alikes, `#c2c2c2` text on `#fafafa` is found (ratio under 2), `#222` text and 26 px
+text at 3.5:1 are not, text on a gradient is counted and not judged, text cut off by
+`overflow: hidden` and text spilling out of its card are found while text that fits is not,
+text with a box over half of it and a button under an overlay are found while a child on top
+of its own parent is not; the page's `MutationObserver` records 0 mutations; a scan took
+2-4 ms at the median (N=20, a small page).
+
+`lyra-uat` personas do not get `inspect_layout` by default (`DEFAULT_TOOLS`): the visual eval
+measures what a model sees, and a DOM reading of contrast and overlap would answer its v2
+tasks without looking.
 
 ### Before and after: `screenshot(name=...)`, `screenshot(compare_to=...)`
 

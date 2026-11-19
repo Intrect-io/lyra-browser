@@ -16,6 +16,7 @@ from . import (
     downloads,
     forms,
     interaction,
+    layout,
     navigation,
     reading,
     tabs,
@@ -29,6 +30,7 @@ def register_all(mcp: FastMCP, ctx: ServerContext) -> None:
     dialogs.register(mcp, ctx)
     forms.register(mcp, ctx)
     reading.register(mcp, ctx)
+    layout.register(mcp, ctx)
     tabs.register(mcp, ctx)
     waiting.register(mcp, ctx)
     downloads.register(mcp, ctx)

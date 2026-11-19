@@ -65,6 +65,12 @@ you need to crop or reuse it, and Claude Code keeps a copy in the session's
 tool-results directory. `read_page` is cheaper than a picture: take one for
 layout, charts, images, or a CAPTCHA to hand off.
 
+To check a change: `screenshot(name="before")`, act (or reload), then
+`screenshot(compare_to="before")` outlines what changed. `screenshot(region=[x, y, w, h])`
+zooms on pixels of the last screenshot (small text, a chart, a pixel-level fault), and
+action replies give `visual_change.region_px` ready for it. `inspect_layout` names low
+contrast, clipped and covered text from the computed styles, for what a picture blurs.
+
 ## Addressing elements
 
 `read_page(mode="tree")` prints one actionable element per line, for example
